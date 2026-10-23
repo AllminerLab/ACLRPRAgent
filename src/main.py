@@ -10,7 +10,7 @@ from rehabilitation_and_rts_pro_gen_tool import ACLRehabPlanner
 from logger import init_logger
 from time_util import TimeTracker
 
-# 基础配置
+# Basic configuration
 base_dir = os.path.split(os.path.realpath(__file__))[0]
 program = os.path.basename(sys.argv[0])
 logger = logging.getLogger(program)
@@ -20,29 +20,25 @@ if not logger.handlers:
 class ACLAgentPipeline:
 
     def __init__(self, base_dir="../data"):
-        """
-        初始化集成系统，设定统一的数据路径
-        """
+        "Initialize the integrated pipeline with a shared data directory."
         self.base_dir = base_dir
         self.interim_dir = self.base_dir + "/interim"
 
 
     def run_single_pipeline(self, center: str, patient: str):
-        """
-        执行单个患者的全流程处理
-        """
+        "Run the complete pipeline for one patient."
         time_tracker = TimeTracker(file_path=f'../data/interim/{center}/{patient}', filename="time_records.json")
         start_time = time.time()
         logger.info("\n" + "#" * 60)
-        logger.info(f"🚀 启动 ACL智能体评估流程")
-        logger.info(f"🏥 中心: {center}")
-        logger.info(f"👤 患者: {patient}")
+        logger.info(f"""Starting the ACLRPRAgent assessment pipeline""")
+        logger.info(f"""Center: {center}""")
+        logger.info(f"""Patient: {patient}""")
         logger.info("#" * 60 + "\n")
 
         # =================================================
-        # Stage 1: 数据预处理 (Data Preprocessing)
+        # Stage 1: Data preprocessing
         # =================================================
-        logger.info(f"🔄 [1/4] 正在执行数据清洗与结构化...")
+        logger.info(f"""[1/4] Cleaning and structuring clinical data""")
         try:
             manager = PatientDataManager()
             success = manager.process_patient(
@@ -51,70 +47,70 @@ class ACLAgentPipeline:
             )
 
             if success:
-                logger.info("\n处理完成！")
+                logger.info("\nProcessing complete")
 
             if not success:
-                logger.error("⛔ [终止] 数据预处理失败，流程停止。")
+                logger.error("[Stopped] Data preprocessing failed")
                 return None
-            logger.info("✅ 数据预处理完成")
+            logger.info("Data preprocessing complete")
         except Exception as e:
-            logger.error(f"⛔ [异常] 数据预处理阶段出错: {e}")
+            logger.error(f"""[Error] Data preprocessing: {e}""")
             return None
 
         # =================================================
-        # Stage 2: ACL-RSI 心理评估 (Psychological Assessment)
+        # Stage 2: ACL-RSI psychological readiness assessment
         # =================================================
-        logger.info(f"\n🧠 [2/4] 正在执行 ACL-RSI 心理准备度评估...")
+        logger.info(f"""\n[2/4] Assessing ACL-RSI psychological readiness""")
         try:
             acl_rsi_predictor = ACLRSIPredictor()
 
             success_s2= acl_rsi_predictor.run(center=center, patient=patient)
 
-            # 注意：如果评估失败（如缺数据），是否阻断流程？
-            # 策略：如果完全失败，后续计划生成会缺数据，建议在此提示但尝试继续，
-            # 或者由 Planner 处理缺失值。这里我们假设必须成功才能生成完美报告。
+            # Decide whether missing assessment data should stop the pipeline.
+            # Without a valid assessment, subsequent planning would lack required inputs.
+            # This pipeline therefore requires a successful assessment before planning.
             if not success_s2:
-                logger.warning("⚠️ ACL-RSI 评估未生成有效结果，后续报告可能缺失心理建议。")
+                logger.warning("ACL-RSI assessment produced no valid result; psychological recommendations would be incomplete.")
                 return None
             else:
-                logger.info("✅ ACL-RSI 评估完成")
+                logger.info("ACL-RSI assessment complete")
         except Exception as e:
-            logger.error(f"⚠️ [异常] ACL-RSI 评估阶段出错: {e}")
+            logger.error(f"""[Error] ACL-RSI assessment: {e}""")
             return None
 
         # =================================================
-        # Stage 3: Tegner 运动评估 (Activity Assessment)
+        # Stage 3: Tegner activity assessment
         # =================================================
-        logger.info(f"\n🏃 [3/4] 正在执行 Tegner 运动水平评估...")
+        logger.info(f"""\n[3/4] Assessing Tegner activity level""")
         try:
             tegner_predictor = TegnerPredictor()
             success_s3 = tegner_predictor.run(center=center, patient=patient)
 
             if not success_s3:
-                logger.warning("⚠️ Tegner 评估未生成有效结果，后续报告可能缺失运动专项建议。")
+                logger.warning("Tegner assessment produced no valid result; activity recommendations would be incomplete.")
                 return None
             else:
-                logger.info("✅ Tegner 评估完成")
+                logger.info("Tegner assessment complete")
         except Exception as e:
-            logger.error(f"⚠️ [异常] Tegner 评估阶段出错: {e}")
+            logger.error(f"""[Error] Tegner assessment: {e}""")
             return None
 
         # =================================================
-        # Stage 4: 康复计划生成 (Plan Generation)
+        # Stage 4: Rehabilitation plan generation
         # =================================================
-        logger.info(f"\n📝 [4/4] 正在生成智能化康复计划与运动建议...")
+        logger.info(f"""\n[4/4] Generating rehabilitation and return-to-activity recommendations""")
         try:
             planner = ACLRehabPlanner(center=center, patient=patient)
-            # Planner 会读取 Stage 2 和 Stage 3 的 JSON 结果
+            # The planner reads the JSON outputs from stages 2 and 3.
             planner.run()
-            logger.info("✅ 康复计划生成完成")
+            logger.info("Rehabilitation plan generation complete")
         except Exception as e:
-            logger.error(f"⛔ [异常] 康复计划生成阶段出错: {e}")
+            logger.error(f"""[Error] Rehabilitation plan generation: {e}""")
             return None
 
         elapsed = time.time() - start_time
         logger.info("\n" + "=" * 60)
-        time_tracker.add_record(start_time=start_time, end_time=time.time(), record_name=f'ACL智能体流程总耗时（min）')
+        time_tracker.add_record(start_time=start_time, end_time=time.time(), record_name=f"""Total ACLRPRAgent pipeline duration (min)""")
         logger.info("=" * 60)
         return True
 
@@ -122,25 +118,25 @@ class ACLAgentPipeline:
         for i in range(2):
             success = self.run_single_pipeline(center=center, patient=patient)
             if success is not None:
-                logger.info(f"{patient}({center})ACL运动康复评估成功！！")
+                logger.info(f"""ACL rehabilitation assessment completed for {patient} ({center})""")
                 return
             else:
-                logger.info(f"出现异常，ACL运动康复重新评估中...")
+                logger.info(f"""An error occurred; retrying ACL rehabilitation assessment""")
 
-        return logger.info(f"{patient}({center})ACL运动康复评估失败")
+        return logger.info(f"""ACL rehabilitation assessment failed for {patient} ({center})""")
 
 
     def run_batch(self, center: str, patient_list: list):
-        """批量处理多个患者"""
-        logger.info(f"📦 开始批量处理 {len(patient_list)} 位患者...")
+        "Process a batch of patients."
+        logger.info(f"""Starting batch processing for {len(patient_list)} patients""")
         for p in patient_list:
             self.run_pipeline(center, p)
 
 
 if __name__ == "__main__":
-    # 实例化系统
+    # Initialize the pipeline.
     system = ACLAgentPipeline(base_dir="../data")
 
     system.run_batch(
-        center="中山二院",
+        center="Center-A",
         patient_list=['A001'])

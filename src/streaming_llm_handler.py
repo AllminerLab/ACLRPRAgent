@@ -19,40 +19,28 @@ if not logger.handlers:
     logger = init_logger('../data/log')
 
 def count_tokens(text: str, model: str) -> int:
-    """
-    统计文本的token数
-    """
+    "Count text tokens."
     try:
-        # 根据模型选择合适的编码器
+        # Choose the tokenizer for the model.
         if "gpt" in model.lower():
-            # GPT模型使用cl100k_base编码
+            # Use cl100k_base for GPT models.
             encoding = tiktoken.get_encoding("cl100k_base")
         elif "claude" in model.lower():
-            # Claude模型的token计算方式
-            # 注意：Claude的实际token计算可能不同，这里使用近似方法
+            # Estimate Claude token usage.
+            # Actual Claude tokenization may differ; this is an approximation.
             encoding = tiktoken.get_encoding("cl100k_base")
         else:
-            # 默认编码器
+            # Default tokenizer
             encoding = tiktoken.get_encoding("cl100k_base")
 
         return len(encoding.encode(text))
     except Exception as e:
-        # 如果无法准确计算，使用粗略估算（1 token ≈ 4字符）
+        # Fallback estimate: approximately 4 characters per token.
         return len(text) // 4
 
 
 def stream_openai_response(base_url=None, api_key=None, model=None, prompt=None, temperature=0.7, timeout=300, maxtoken=8096, response_format=None, token_recorder=None,**kwargs):
-    """
-    流式接收OpenAI响应，解决返回结果较多的问题
-
-    参数:
-        api_key: OpenAI API密钥（可选，默认从环境变量读取）
-        model: 使用的模型，默认 gpt-3.5-turbo
-        **kwargs: 其他参数如 temperature, max_tokens 等
-
-    返回:
-        完整的响应文本
-    """
+    "Receive a streamed OpenAI response and return the complete response text. api_key is optional and otherwise read from the environment; model defaults to gpt-3.5-turbo; kwargs accepts temperature, max_tokens and other options."
     try:
         client = Anthropic(api_key=CLAUDE_KEY_API, base_url="https://chat.cloudapi.vip")
         full_response = ''
@@ -66,9 +54,9 @@ def stream_openai_response(base_url=None, api_key=None, model=None, prompt=None,
         ) as stream:
             for text in stream.text_stream:
                 full_response += text
-                print(text, end="", flush=True)  # 实时打印
+                print(text, end="", flush=True)  # Print streaming output immediately.
 
-            # 获取最终的usage信息
+            # Read final usage information.
             final_message = stream.get_final_message()
             prompt_tokens = final_message.usage.input_tokens
             completion_tokens = final_message.usage.output_tokens
@@ -82,25 +70,19 @@ def stream_openai_response(base_url=None, api_key=None, model=None, prompt=None,
 
 
     except Exception as e:
-        print(f"错误: {e}")
+        print(f"""Error: {e}""")
         return None
 
 
     except Exception as e:
-        print(f"错误: {e}")
+        print(f"""Error: {e}""")
         return None
 
 
 
 class SeekClient:
     def __init__(self, api_key: Optional[str] = None, model:str="deepseek-chat", base_url: str = "https://api.deepseek.com"):
-        """
-        初始化DeepSeek客户端
-
-        Args:
-            api_key: DeepSeek API密钥，如果不提供则从环境变量DEEPSEEK_API_KEY读取
-            base_url: API基础URL
-        """
+        "Initialize the DeepSeek client with api_key and base_url. If api_key is omitted, read DEEPSEEK_API_KEY from the environment."
         self.api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
         if not self.api_key:
             raise ValueError(
@@ -120,19 +102,7 @@ class SeekClient:
                     temperature: float = 1.0,
                     max_tokens: Optional[int] = None,
                     **kwargs) -> Generator[Dict[str, Any], None, None]:
-        """
-        流式聊天接口
-
-        Args:
-            messages: 消息列表，格式: [{"role": "user", "content": "Hello"}]
-            model: 模型名称
-            temperature: 温度参数
-            max_tokens: 最大令牌数
-            **kwargs: 其他参数
-
-        Yields:
-            Dict: 流式响应数据
-        """
+        "Yield streamed response dictionaries for messages, model, temperature, max_tokens and additional kwargs. Each message contains role and content."
         url = f"{self.base_url}/v1/chat/completions"
 
         payload = {
@@ -147,7 +117,7 @@ class SeekClient:
             payload["max_tokens"] = max_tokens
 
         # 1022 todo
-        # 请求在流中包含用量，兼容OpenAI风格；服务端不支持时会被忽略
+        # Request usage in the stream; unsupported servers may ignore this option.
         payload["stream_options"] = {"include_usage": True}
 
         try:
@@ -157,7 +127,7 @@ class SeekClient:
                 for line in response.iter_lines(decode_unicode=True):
                     if line.strip():
                         if line.startswith('data: '):
-                            data = line[6:]  # 移除 'data: ' 前缀
+                            data = line[6:]  # Remove the 'data: ' prefix.
 
                             if data.strip() == '[DONE]':
                                 break
@@ -177,19 +147,7 @@ class SeekClient:
                          temperature: float = 1.0,
                          max_tokens: Optional[int] = None,
                          **kwargs) -> Generator[str, None, None]:
-        """
-        流式聊天接口，只返回文本内容
-
-        Args:
-            messages: 消息列表
-            model: 模型名称
-            temperature: 温度参数
-            max_tokens: 最大令牌数
-            **kwargs: 其他参数
-
-        Yields:
-            str: 流式文本内容
-        """
+        "Yield only text from a streamed response for messages, model, temperature, max_tokens and additional kwargs."
         for chunk in self.chat_stream(messages, model, temperature, max_tokens, **kwargs):
             if 'choices' in chunk and chunk['choices']:
                 delta = chunk['choices'][0].get('delta', {})
@@ -198,22 +156,22 @@ class SeekClient:
 
 
 def deepseek_stream_calling(api_key, prompt, base_url: str = "https://api.deepseek.com", model="deepseek-chat", temperature=0.2, max_tokens=8096, token_recorder=None, **kwargs):
-    """高级流式输出示例，展示完整的响应数据"""
+    "Demonstrate streaming with complete response metadata."
     client = SeekClient(api_key=api_key, base_url=base_url)
 
     messages = [
-        {"role": "system", "content": "你是一个专业的医疗需求分析助手。"},
+        {"role": "system", "content": "You are a professional medical requirements analysis assistant."},
         {"role": "user", "content": prompt}
     ]
     # print(prompt)
 
-    # print("完整流式响应数据:")
+    # print("Full streaming response:")
     # print("-" * 50)
 
     try:
         full_content = ""
         for chunk in client.chat_stream(messages, model=model, temperature=temperature, max_tokens=max_tokens):
-            # 打印完整的chunk数据（调试用）
+            # Print complete chunks for debugging.
             # print(f"Chunk: {json.dumps(chunk, ensure_ascii=False, indent=2)}")
 
             if 'choices' in chunk and chunk['choices']:
@@ -224,28 +182,28 @@ def deepseek_stream_calling(api_key, prompt, base_url: str = "https://api.deepse
                     full_content += content
                     print(content, end='', flush=True)
 
-                # 检查是否完成
+                # Check whether the response is complete.
                 if choice.get('finish_reason') :
                     if choice['finish_reason'] == 'stop':
-                        print(f"\n\n调用成功")
+                        print(f"""\n\nCall succeeded""")
 
-            # 捕获用量（不同实现格式可能不同，这里做了多种兼容）
+            # Handle usage information from different API response formats.
             if token_recorder is not None:
-                # 1) 顶层 usage 字段
+                # 1. Top-level usage field
                 if 'usage' in chunk and isinstance(chunk['usage'], dict):
                     token_recorder.add_record(prompt_tokens=chunk['usage'].get('prompt_tokens'),
                                 completion_tokens=chunk['usage'].get('completion_tokens'),
                                 total_tokens=chunk['usage'].get('total_tokens'))
 
-                # 2) 一些兼容OpenAI的新流式格式会有 type 字段
-                #    如 type == 'response.completed' 时附带 usage
+                # 2. Some OpenAI-compatible streams include a type field.
+                # For example, response.completed may carry usage data.
                 if chunk.get('type') in ('response.completed', 'response.summary'):
                     if 'usage' in chunk and isinstance(chunk['usage'], dict):
                         token_recorder.add_record(prompt_tokens=chunk['usage'].get('prompt_tokens'),
                                                   completion_tokens=chunk['usage'].get('completion_tokens'),
                                                   total_tokens=chunk['usage'].get('total_tokens'))
 
-        # print(f"\n\n完整内容:\n{full_content}")
+        # print(f"\n\nFull content:\n{full_content}")
         return full_content
 
     except Exception as e:
@@ -255,20 +213,11 @@ def deepseek_stream_calling(api_key, prompt, base_url: str = "https://api.deepse
 
 def qwen_stream_completion0(content: str, api_key: str, base_url: str="https://dashscope.aliyuncs.com/compatible-mode/v1",
                            enable_thinking: bool = True, model: str='qwen3-max', temperature=0.6,
-                           system_prompt: str ='你是一位资深的运动医学专家，专门研究ACL重建术后患者的康复评估') -> dict:
-    """
-    流式调用 qwen3-max 并解析 JSON 结果
-
-    Args:
-        content: 用户输入内容
-        enable_thinking: 是否启用思考模式
-
-    Returns:
-        解析后的 JSON 字典
-    """
+                           system_prompt: str ="You are a senior sports medicine specialist specializing in post-ACLR rehabilitation assessment.") -> dict:
+    "Stream a Qwen response and return parsed JSON. content is the user prompt; enable_thinking selects reasoning mode."
     client = OpenAI(api_key=api_key, base_url=base_url)
 
-    # 构建请求参数
+    # Build request parameters.
     request_params = {
         "model": model,
         "messages": [
@@ -278,15 +227,15 @@ def qwen_stream_completion0(content: str, api_key: str, base_url: str="https://d
         "temperature": temperature
     }
 
-    # qwen3-max 思考模式配置
+    # Configure qwen3-max reasoning mode.
     if enable_thinking:
         request_params["extra_body"] = {"enable_thinking": True}
 
     try:
         stream = client.chat.completions.create(**request_params)
 
-        reasoning_content = ""  # 思考过程
-        result_text = ""  # 最终回复
+        reasoning_content = ""  # Reasoning content
+        result_text = ""  # Final response
 
         for chunk in stream:
             if not chunk.choices:
@@ -294,30 +243,30 @@ def qwen_stream_completion0(content: str, api_key: str, base_url: str="https://d
 
             delta = chunk.choices[0].delta
 
-            # 处理思考内容（qwen3-max 特有）
+            # Handle qwen3-max reasoning content.
             if enable_thinking and hasattr(delta, 'reasoning_content') and delta.reasoning_content:
                 reasoning_content += delta.reasoning_content
-                print(f"\033[90m{delta.reasoning_content}\033[0m", end="", flush=True)  # 灰色显示思考
+                print(f"\033[90m{delta.reasoning_content}\033[0m", end="", flush=True)  # Display reasoning in gray.
 
-            # 处理正式回复
+            # Handle the final response.
             if delta.content:
                 result_text += delta.content
                 print(delta.content, end="", flush=True)
 
-        print()  # 换行
+        print()  # Start a new line.
 
         if reasoning_content:
-            logger.debug(f"思考过程：\n{reasoning_content}")
-        # logger.info(f"读取内容如下：\n{result_text}")
+            logger.debug(f"""Reasoning:\n{reasoning_content}""")
+        # logger.info(f"Extracted content:\n{result_text}")
 
-        # 解析 JSON（处理 markdown 代码块包裹的情况）
+        # Parse JSON, allowing Markdown code fences.
         parsed_text = result_text.strip()
         if parsed_text.startswith("```"):
-            # 提取代码块内容
+            # Extract fenced content.
             parts = parsed_text.split("```")
             if len(parts) >= 2:
                 parsed_text = parts[1]
-                # 移除语言标识符（如 json）
+                # Remove the language identifier, such as json.
                 if parsed_text.startswith("json"):
                     parsed_text = parsed_text[4:]
                 elif parsed_text.startswith("\n"):
@@ -328,12 +277,12 @@ def qwen_stream_completion0(content: str, api_key: str, base_url: str="https://d
         return result
 
     except Exception as e:
-        logger.error(f"流式调用失败: {e}")
+        logger.error(f"""Streaming call failed: {e}""")
         return None
 
 def qwen_stream_completion(content: str, api_key: str, base_url: str="https://dashscope.aliyuncs.com/compatible-mode/v1",
                            enable_thinking: bool = True, model: str='qwen3-max', temperature=0.6,
-                           system_prompt: str ='你是一位资深的运动医学专家，专门研究ACL重建术后患者的康复评估', api_attempt_times: int=3):
+                           system_prompt: str ="You are a senior sports medicine specialist specializing in post-ACLR rehabilitation assessment.", api_attempt_times: int=3):
 
     for i in range(api_attempt_times):
         response = single_qwen_stream_completion(content=content,
@@ -344,29 +293,20 @@ def qwen_stream_completion(content: str, api_key: str, base_url: str="https://da
                                                  temperature=temperature,
                                                  system_prompt=system_prompt)
         if response:
-            logger.info("LLM API调用成功！")
+            logger.info("LLM API call succeeded")
             return response
         else:
-            logger.info("LLM API异常，重新调用中...")
+            logger.info("LLM API error; retrying")
 
     return None
 
 def single_qwen_stream_completion(content: str, api_key: str, base_url: str="https://dashscope.aliyuncs.com/compatible-mode/v1",
                            enable_thinking: bool = True, model: str='qwen3-max', temperature=0.6,
-                           system_prompt: str ='你是一位资深的运动医学专家，专门研究ACL重建术后患者的康复评估') -> dict:
-    """
-    流式调用 qwen3-max 并解析 JSON 结果
-
-    Args:
-        content: 用户输入内容
-        enable_thinking: 是否启用思考模式
-
-    Returns:
-        解析后的 JSON 字典
-    """
+                           system_prompt: str ="You are a senior sports medicine specialist specializing in post-ACLR rehabilitation assessment.") -> dict:
+    "Stream a Qwen response and return parsed JSON. content is the user prompt; enable_thinking selects reasoning mode."
     client = OpenAI(api_key=api_key, base_url=base_url)
 
-    # 构建请求参数
+    # Build request parameters.
     request_params = {
         "model": model,
         "messages": [
@@ -376,15 +316,15 @@ def single_qwen_stream_completion(content: str, api_key: str, base_url: str="htt
         "temperature": temperature
     }
 
-    # qwen3-max 思考模式配置
+    # Configure qwen3-max reasoning mode.
     if enable_thinking:
         request_params["extra_body"] = {"enable_thinking": True}
 
     try:
         stream = client.chat.completions.create(**request_params)
 
-        reasoning_content = ""  # 思考过程
-        result_text = ""  # 最终回复
+        reasoning_content = ""  # Reasoning content
+        result_text = ""  # Final response
 
         for chunk in stream:
             if not chunk.choices:
@@ -392,62 +332,62 @@ def single_qwen_stream_completion(content: str, api_key: str, base_url: str="htt
 
             delta = chunk.choices[0].delta
 
-            # 处理思考内容（qwen3-max 特有）
+            # Handle qwen3-max reasoning content.
             if enable_thinking and hasattr(delta, 'reasoning_content') and delta.reasoning_content:
                 reasoning_content += delta.reasoning_content
-                print(f"\033[90m{delta.reasoning_content}\033[0m", end="", flush=True)  # 灰色显示思考
+                print(f"\033[90m{delta.reasoning_content}\033[0m", end="", flush=True)  # Display reasoning in gray.
 
-            # 处理正式回复
+            # Handle the final response.
             if delta.content:
                 result_text += delta.content
                 print(delta.content, end="", flush=True)
 
-        print()  # 换行
+        print()  # Start a new line.
 
         # if reasoning_content:
-        #     logger.debug(f"思考过程：\n{reasoning_content}")
-        # logger.info(f"读取内容如下：\n{result_text}")
+        #     logger.debug(f"Reasoning:\n{reasoning_content}")
+        # logger.info(f"Extracted content:\n{result_text}")
 
         # ==========================================================
-        # 🚀 核心修复：鲁棒的 JSON 提取与解析逻辑
+        # Robust JSON extraction and parsing
         # ==========================================================
 
         parsed_result = None
         clean_text = result_text.strip()
 
-        # 方案 A: 尝试直接解析（应对纯 JSON 返回）
+        # Approach A: Parse a plain JSON response directly.
         try:
             parsed_result = json.loads(clean_text)
         except json.JSONDecodeError:
-            # 方案 B: 使用正则提取 Markdown 代码块中的 JSON
-            # 匹配 ```json {...} ``` 或 ``` {...} ```
+            # Approach B: Extract JSON from a Markdown code fence.
+            # Match ```json {...} ``` or ``` {...} ```.
             try:
-                # 寻找第一个 { 开头，最后一个 } 结尾的字符串，跨行匹配
+                # Match from the first opening brace to the final closing brace across lines.
                 match = re.search(r'\{.*\}', clean_text, re.DOTALL)
                 if match:
                     json_str = match.group()
                     parsed_result = json.loads(json_str)
             except Exception as e:
-                logger.warning(f"正则提取JSON失败: {e}")
+                logger.warning(f"""Regex-based JSON extraction failed: {e}""")
 
-        # 如果最终解析成功，返回字典
+        # Return a dictionary if parsing succeeds.
         if parsed_result and isinstance(parsed_result, dict):
             return parsed_result
 
         # ==========================================================
-        # 🛡️ 兜底策略：如果解析失败，不要返回空，而是返回包含原始文本的字典
+        # Fallback: preserve the original text in a dictionary when parsing fails.
         # ==========================================================
-        logger.warning(f"警告：模型返回内容无法解析为JSON，返回原始文本。原始内容预览: {clean_text[:50]}...")
+        logger.warning(f"""Warning: Model response could not be parsed as JSON; returning text. Preview: {clean_text[:50]}...""")
 
-        # 尝试构造一个伪造的成功响应，避免后续流程崩溃
+        # Wrap the raw response to preserve the caller interface.
         return None
 
     except Exception as e:
-        logger.error(f"流式调用失败: {e}")
+        logger.error(f"""Streaming call failed: {e}""")
         return None
 
 if __name__ == "__main__":
     qwen_stream_completion(
         api_key='sk-2d407625a6904a50baca3f79cb7d3b1a',
-        content="请用JSON格式返回今天的天气信息",
+        content="Return today's weather information in JSON format.",
         enable_thinking=True)

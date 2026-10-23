@@ -6,63 +6,40 @@ import uuid
 
 
 class TimeTracker:
-    """
-    时间工具类 - 用于记录和管理时间跟踪数据
-
-    特性：
-    - 支持增量读取，多次初始化不会丢失历史数据
-    - 在指定路径创建和管理JSON文件
-    - 添加时间记录（自动计算耗时）
-    - 读取和查询时间记录
-    - 支持反复初始化和使用
-    """
+    "Track elapsed time in a JSON file. Preserve existing records across initialization, append records with computed durations, and support repeated reading and querying."
 
     def __init__(self, file_path: str, filename: str = "time_records.json"):
-        """
-        初始化时间跟踪器（支持增量加载）
-
-        Args:
-            file_path (str): JSON文件存储路径
-            filename (str): JSON文件名，默认为"time_records.json"
-        """
+        "Initialize an incremental time tracker at file_path with filename, defaulting to time_records.json."
         self.file_path = file_path
         self.filename = filename
         self.full_path = os.path.join(file_path, filename)
 
-        # 确保目录存在
+        # Ensure the directory exists.
         os.makedirs(file_path, exist_ok=True)
 
-        # 初始化或加载JSON文件（增量模式）
+        # Initialize or load the JSON file incrementally.
         self._initialize_or_load_json_file()
 
-        print(f"时间跟踪器已初始化: {self.full_path}")
+        print(f"""Time tracker initialized: {self.full_path}""")
 
     def _initialize_or_load_json_file(self) -> None:
-        """初始化或加载JSON文件（增量模式，保留已有数据）"""
+        "Initialize or load a JSON file while preserving existing data."
         if not os.path.exists(self.full_path):
-            # 文件不存在，创建新文件
+            # Create the file if it does not exist.
             initial_data = {}
             self._save_json_data(initial_data)
-            print(f"已创建新的时间记录文件: {self.full_path}")
+            print(f"""Created time log: {self.full_path}""")
         else:
             data = self._read_json_data()
-            # 更新最后访问时间
-            print(f"已加载现有时间记录文件: {self.full_path}")
+            # Update the last-access time.
+            print(f"""Loaded existing time log: {self.full_path}""")
 
     def _parse_time(self, time_input: Union[str, datetime]) -> datetime:
-        """
-        解析时间输入，支持多种格式
-
-        Args:
-            time_input: 时间输入，可以是字符串或datetime对象
-
-        Returns:
-            datetime: 解析后的datetime对象
-        """
+        "Parse time_input, a string or datetime object, using supported formats. Return a datetime."
         if isinstance(time_input, datetime):
             return time_input
 
-        # 支持的时间格式
+        # Supported time formats
         time_formats = [
             "%Y-%m-%d %H:%M:%S",  # 2024-01-01 10:30:00
             "%Y-%m-%d %H:%M",  # 2024-01-01 10:30
@@ -74,7 +51,7 @@ class TimeTracker:
         for fmt in time_formats:
             try:
                 if fmt in ["%H:%M:%S", "%H:%M"]:
-                    # 对于只有时间的格式，使用今天的日期
+                    # Use today's date for time-only inputs.
                     time_obj = datetime.strptime(time_input, fmt)
                     return datetime.now().replace(
                         hour=time_obj.hour,
@@ -83,7 +60,7 @@ class TimeTracker:
                         microsecond=0
                     )
                 elif fmt == "%m-%d %H:%M":
-                    # 对于没有年份的格式，使用当前年份
+                    # Use the current year when the year is absent.
                     time_obj = datetime.strptime(f"{datetime.now().year}-{time_input}", "%Y-%m-%d %H:%M")
                     return time_obj
                 else:
@@ -91,147 +68,115 @@ class TimeTracker:
             except ValueError:
                 continue
 
-        raise ValueError(f"无法解析时间格式: {time_input}")
+        raise ValueError(f"""Unable to parse time format: {time_input}""")
 
 
     def add_record(self, start_time,
                    end_time,
                    record_name: str,
                    time_reset: bool=True) -> Dict:
-        """
-        添加时间记录（增量添加，不影响现有记录）
-
-        Args:
-            start_time: 开始时间
-            end_time: 结束时间
-            record_name: 记录名称
-        Returns:
-            Dict: 添加的记录信息
-        """
+        "Append a record with start_time, end_time and record_name without changing existing records. Return the new record dictionary."
         try:
-            # 解析时间
+            # Parse timestamps.
 
 
-            # 验证时间逻辑
+            # Validate temporal order.
             if end_time <= start_time:
-                raise ValueError("结束时间必须晚于开始时间")
+                raise ValueError("End time must be later than start time")
 
-            # 计算耗时（分钟）
+            # Calculate elapsed time in minutes.
             duration_minutes = round((end_time - start_time)/ 60, 4)
 
-            # 读取最新数据（确保获取到其他实例可能添加的记录）
+            # Read current data to include records added by other instances.
             data = self._read_json_data()
 
             if time_reset:
                 data[record_name] = duration_minutes
             else:
                 data[record_name] += duration_minutes
-            # 保存数据
+            # Save data.
             self._save_json_data(data)
 
-            print(f"✓ 成功添加记录: {record_name} (耗时: {duration_minutes}分钟)")
+            print(f"""Added record: {record_name} (duration: {duration_minutes} minutes)""")
 
         except Exception as e:
-            print(f"✗ 添加记录失败: {str(e)}")
+            print(f"""Failed to add record: {str(e)}""")
             raise
 
     def _read_json_data(self) -> Dict:
-        """读取JSON文件数据（每次都从文件读取最新数据）"""
+        "Read the latest JSON data from disk on every call."
         try:
             with open(self.full_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except FileNotFoundError:
-            # 如果文件被删除，重新初始化
-            print("警告: JSON文件被删除，正在重新创建...")
+            # Reinitialize if the file was deleted.
+            print("Warning: JSON file was deleted; recreating")
             self._initialize_or_load_json_file()
             with open(self.full_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"读取JSON文件失败: {str(e)}")
+            print(f"""Failed to read JSON file: {str(e)}""")
             raise
 
     def _save_json_data(self, data: Dict) -> None:
-        """保存数据到JSON文件"""
+        "Save data to a JSON file."
         try:
-            # 确保目录存在
+            # Ensure the directory exists.
             os.makedirs(self.file_path, exist_ok=True)
 
-            # 原子性写入（先写临时文件，再重命名）
+            # Write atomically through a temporary file.
             temp_path = f"{self.full_path}.tmp"
             with open(temp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
-            # 原子性替换
+            # Atomically replace the destination.
             os.replace(temp_path, self.full_path)
 
         except Exception as e:
-            # 清理临时文件
+            # Clean up the temporary file.
             temp_path = f"{self.full_path}.tmp"
             if os.path.exists(temp_path):
                 os.remove(temp_path)
-            print(f"保存JSON文件失败: {str(e)}")
+            print(f"""Failed to save JSON file: {str(e)}""")
             raise
 
 
 
 class ThinkTracker:
-    """
-    时间工具类 - 用于记录和管理时间跟踪数据
-
-    特性：
-    - 支持增量读取，多次初始化不会丢失历史数据
-    - 在指定路径创建和管理JSON文件
-    - 添加时间记录（自动计算耗时）
-    - 读取和查询时间记录
-    - 支持反复初始化和使用
-    """
+    "Track elapsed time in a JSON file. Preserve existing records across initialization, append records with computed durations, and support repeated reading and querying."
 
     def __init__(self, file_path: str, filename: str = "think_records.json"):
-        """
-        初始化时间跟踪器（支持增量加载）
-
-        Args:
-            file_path (str): JSON文件存储路径
-            filename (str): JSON文件名，默认为"think_records.json"
-        """
+        "Initialize an incremental reasoning tracker at file_path with filename, defaulting to think_records.json."
         self.file_path = file_path
         self.filename = filename
         self.full_path = os.path.join(file_path, filename)
 
-        # 确保目录存在
+        # Ensure the directory exists.
         os.makedirs(file_path, exist_ok=True)
 
-        # 初始化或加载JSON文件（增量模式）
+        # Initialize or load the JSON file incrementally.
         self._initialize_or_load_json_file()
 
-        print(f"时间跟踪器已初始化: {self.full_path}")
+        print(f"""Time tracker initialized: {self.full_path}""")
 
     def _initialize_or_load_json_file(self) -> None:
-        """初始化或加载JSON文件（增量模式，保留已有数据）"""
+        "Initialize or load a JSON file while preserving existing data."
         if not os.path.exists(self.full_path):
-            # 文件不存在，创建新文件
+            # Create the file if it does not exist.
             initial_data = {}
             self._save_json_data(initial_data)
-            print(f"已创建新的思考记录文件: {self.full_path}")
+            print(f"""Created reasoning log: {self.full_path}""")
         else:
             data = self._read_json_data()
-            # 更新最后访问时间
-            print(f"已加载现有思考记录文件: {self.full_path}")
+            # Update the last-access time.
+            print(f"""Loaded existing reasoning log: {self.full_path}""")
 
     def _parse_time(self, time_input: Union[str, datetime]) -> datetime:
-        """
-        解析时间输入，支持多种格式
-
-        Args:
-            time_input: 时间输入，可以是字符串或datetime对象
-
-        Returns:
-            datetime: 解析后的datetime对象
-        """
+        "Parse time_input, a string or datetime object, using supported formats. Return a datetime."
         if isinstance(time_input, datetime):
             return time_input
 
-        # 支持的时间格式
+        # Supported time formats
         time_formats = [
             "%Y-%m-%d %H:%M:%S",  # 2024-01-01 10:30:00
             "%Y-%m-%d %H:%M",  # 2024-01-01 10:30
@@ -243,7 +188,7 @@ class ThinkTracker:
         for fmt in time_formats:
             try:
                 if fmt in ["%H:%M:%S", "%H:%M"]:
-                    # 对于只有时间的格式，使用今天的日期
+                    # Use today's date for time-only inputs.
                     time_obj = datetime.strptime(time_input, fmt)
                     return datetime.now().replace(
                         hour=time_obj.hour,
@@ -252,7 +197,7 @@ class ThinkTracker:
                         microsecond=0
                     )
                 elif fmt == "%m-%d %H:%M":
-                    # 对于没有年份的格式，使用当前年份
+                    # Use the current year when the year is absent.
                     time_obj = datetime.strptime(f"{datetime.now().year}-{time_input}", "%Y-%m-%d %H:%M")
                     return time_obj
                 else:
@@ -260,23 +205,21 @@ class ThinkTracker:
             except ValueError:
                 continue
 
-        raise ValueError(f"无法解析时间格式: {time_input}")
+        raise ValueError(f"""Unable to parse time format: {time_input}""")
 
 
     def add_record(self,
                    module: str,
                    think,
                    sub_module=None) -> Dict:
-        """
-        添加时间记录（增量添加，不影响现有记录）
-        """
+        "Append a record without changing existing entries."
         try:
-            # 解析时间
+            # Parse timestamps.
 
 
-            # 验证时间逻辑
+            # Validate temporal order.
 
-            # 读取最新数据（确保获取到其他实例可能添加的记录）
+            # Read current data to include records added by other instances.
             data = self._read_json_data()
             if sub_module is None:
                 data[module] = think
@@ -293,95 +236,80 @@ class ThinkTracker:
                     data[module] = {}
                     data[module][sub_module] = think
 
-            # 保存数据
+            # Save data.
             self._save_json_data(data)
 
-            print(f"✓ 成功添加 {module}({sub_module})的思考：{think} ")
+            print(f"""Added reasoning for {module} ({sub_module}): {think}""")
 
         except Exception as e:
-            print(f"✗ 添加记录失败: {str(e)}")
+            print(f"""Failed to add record: {str(e)}""")
             raise
 
     def _read_json_data(self) -> Dict:
-        """读取JSON文件数据（每次都从文件读取最新数据）"""
+        "Read the latest JSON data from disk on every call."
         try:
             with open(self.full_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except FileNotFoundError:
-            # 如果文件被删除，重新初始化
-            print("警告: JSON文件被删除，正在重新创建...")
+            # Reinitialize if the file was deleted.
+            print("Warning: JSON file was deleted; recreating")
             self._initialize_or_load_json_file()
             with open(self.full_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"读取JSON文件失败: {str(e)}")
+            print(f"""Failed to read JSON file: {str(e)}""")
             raise
 
     def _save_json_data(self, data: Dict) -> None:
-        """保存数据到JSON文件"""
+        "Save data to a JSON file."
         try:
-            # 确保目录存在
+            # Ensure the directory exists.
             os.makedirs(self.file_path, exist_ok=True)
 
-            # 原子性写入（先写临时文件，再重命名）
+            # Write atomically through a temporary file.
             temp_path = f"{self.full_path}.tmp"
             with open(temp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
-            # 原子性替换
+            # Atomically replace the destination.
             os.replace(temp_path, self.full_path)
 
         except Exception as e:
-            # 清理临时文件
+            # Clean up the temporary file.
             temp_path = f"{self.full_path}.tmp"
             if os.path.exists(temp_path):
                 os.remove(temp_path)
-            print(f"保存JSON文件失败: {str(e)}")
+            print(f"""Failed to save JSON file: {str(e)}""")
             raise
 
 
 class TokenTracker:
-    """
-    时间工具类 - 用于记录和管理时间跟踪数据
-
-    特性：
-    - 支持增量读取，多次初始化不会丢失历史数据
-    - 在指定路径创建和管理JSON文件
-    - 添加时间记录（自动计算耗时）
-    - 读取和查询时间记录
-    - 支持反复初始化和使用
-    """
+    "Track elapsed time in a JSON file. Preserve existing records across initialization, append records with computed durations, and support repeated reading and querying."
 
     def __init__(self, file_path: str, filename: str = "think_records.json", module=None, reset=True):
-        """
-        初始化时间跟踪器（支持增量加载）
-
-        Args:
-            file_path (str): JSON文件存储路径
-            filename (str): JSON文件名，默认为"think_records.json"
-        """
+        "Initialize an incremental reasoning tracker at file_path with filename, defaulting to think_records.json."
         self.file_path = file_path
         self.filename = filename
         self.full_path = os.path.join(file_path, filename)
         self.module = module
         self.reset = reset
 
-        # 确保目录存在
+        # Ensure the directory exists.
         os.makedirs(file_path, exist_ok=True)
 
-        # 初始化或加载JSON文件（增量模式）
+        # Initialize or load the JSON file incrementally.
         self._initialize_or_load_json_file()
 
-        print(f"Token跟踪器已初始化: {self.full_path}")
+        print(f"""Token tracker initialized: {self.full_path}""")
 
     def _initialize_or_load_json_file(self) -> None:
-        """初始化或加载JSON文件（增量模式，保留已有数据）"""
+        "Initialize or load a JSON file while preserving existing data."
         if not os.path.exists(self.full_path):
-            # 文件不存在，创建新文件
+            # Create the file if it does not exist.
             initial_data = {self.module: {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}
             self._save_json_data(initial_data)
-            print(f"已创建新的token记录文件: {self.full_path}")
-            print(f"当前 {self.module}的token数 prompt_tokens: {initial_data[self.module]['prompt_tokens']}, "
+            print(f"""Created token log: {self.full_path}""")
+            print(f"""Current token counts for {self.module}: prompt_tokens: {initial_data[self.module]['prompt_tokens']}, """
                   f"completion_tokens: {initial_data[self.module]['completion_tokens']}, "
                   f"total_tokens: {initial_data[self.module]['total_tokens']}")
         else:
@@ -389,27 +317,19 @@ class TokenTracker:
             if self.reset:
                 data[self.module] = {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
             self._save_json_data(data)
-            # 更新最后访问时间
-            print(f"已加载现有token记录文件: {self.full_path}")
-            print(f"加载后 {self.module}的token数 prompt_tokens: {data[self.module]['prompt_tokens']}, "
+            # Update the last-access time.
+            print(f"""Loaded existing token log: {self.full_path}""")
+            print(f"""Loaded token counts for {self.module}: prompt_tokens: {data[self.module]['prompt_tokens']}, """
                   f"completion_tokens: {data[self.module]['completion_tokens']}, "
                   f"total_tokens: {data[self.module]['total_tokens']}")
 
 
     def _parse_time(self, time_input: Union[str, datetime]) -> datetime:
-        """
-        解析时间输入，支持多种格式
-
-        Args:
-            time_input: 时间输入，可以是字符串或datetime对象
-
-        Returns:
-            datetime: 解析后的datetime对象
-        """
+        "Parse time_input, a string or datetime object, using supported formats. Return a datetime."
         if isinstance(time_input, datetime):
             return time_input
 
-        # 支持的时间格式
+        # Supported time formats
         time_formats = [
             "%Y-%m-%d %H:%M:%S",  # 2024-01-01 10:30:00
             "%Y-%m-%d %H:%M",  # 2024-01-01 10:30
@@ -421,7 +341,7 @@ class TokenTracker:
         for fmt in time_formats:
             try:
                 if fmt in ["%H:%M:%S", "%H:%M"]:
-                    # 对于只有时间的格式，使用今天的日期
+                    # Use today's date for time-only inputs.
                     time_obj = datetime.strptime(time_input, fmt)
                     return datetime.now().replace(
                         hour=time_obj.hour,
@@ -430,7 +350,7 @@ class TokenTracker:
                         microsecond=0
                     )
                 elif fmt == "%m-%d %H:%M":
-                    # 对于没有年份的格式，使用当前年份
+                    # Use the current year when the year is absent.
                     time_obj = datetime.strptime(f"{datetime.now().year}-{time_input}", "%Y-%m-%d %H:%M")
                     return time_obj
                 else:
@@ -438,7 +358,7 @@ class TokenTracker:
             except ValueError:
                 continue
 
-        raise ValueError(f"无法解析时间格式: {time_input}")
+        raise ValueError(f"""Unable to parse time format: {time_input}""")
 
 
     def add_record(self,
@@ -446,16 +366,14 @@ class TokenTracker:
                    prompt_tokens=0,
                    completion_tokens=0,
                    total_tokens=0) -> Dict:
-        """
-        添加时间记录（增量添加，不影响现有记录）
-        """
+        "Append a record without changing existing entries."
         try:
-            # 解析时间
+            # Parse timestamps.
 
 
-            # 验证时间逻辑
+            # Validate temporal order.
 
-            # 读取最新数据（确保获取到其他实例可能添加的记录）
+            # Read current data to include records added by other instances.
             data = self._read_json_data()
 
             if module is None:
@@ -477,52 +395,52 @@ class TokenTracker:
             data[module]['completion_tokens'] = data[module]['completion_tokens'] + completion_tokens
             data[module]['total_tokens'] = data[module]['total_tokens'] + total_tokens
 
-            # 保存数据
+            # Save data.
             self._save_json_data(data)
 
-            print(f"\n✓ 成功添加 {module}的token数 / 截止当前token数:  prompt_tokens: {prompt_tokens}/{data[module]['prompt_tokens']}, "
+            print(f"""Added tokens / cumulative tokens for {module}: prompt_tokens: {prompt_tokens}/{data[module]['prompt_tokens']}, """
                   f"completion_tokens: {completion_tokens}/{data[module]['completion_tokens']}, "
                   f"total_tokens: total_tokens: {total_tokens}/{data[module]['total_tokens']}")
 
         except Exception as e:
-            print(f"✗ 添加记录失败: {str(e)}")
+            print(f"""Failed to add record: {str(e)}""")
             raise
 
     def _read_json_data(self) -> Dict:
-        """读取JSON文件数据（每次都从文件读取最新数据）"""
+        "Read the latest JSON data from disk on every call."
         try:
             with open(self.full_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except FileNotFoundError:
-            # 如果文件被删除，重新初始化
-            print("警告: JSON文件被删除，正在重新创建...")
+            # Reinitialize if the file was deleted.
+            print("Warning: JSON file was deleted; recreating")
             self._initialize_or_load_json_file()
             with open(self.full_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"读取JSON文件失败: {str(e)}")
+            print(f"""Failed to read JSON file: {str(e)}""")
             raise
 
     def _save_json_data(self, data: Dict) -> None:
-        """保存数据到JSON文件"""
+        "Save data to a JSON file."
         try:
-            # 确保目录存在
+            # Ensure the directory exists.
             os.makedirs(self.file_path, exist_ok=True)
 
-            # 原子性写入（先写临时文件，再重命名）
+            # Write atomically through a temporary file.
             temp_path = f"{self.full_path}.tmp"
             with open(temp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
-            # 原子性替换
+            # Atomically replace the destination.
             os.replace(temp_path, self.full_path)
 
         except Exception as e:
-            # 清理临时文件
+            # Clean up the temporary file.
             temp_path = f"{self.full_path}.tmp"
             if os.path.exists(temp_path):
                 os.remove(temp_path)
-            print(f"保存JSON文件失败: {str(e)}")
+            print(f"""Failed to save JSON file: {str(e)}""")
             raise
 
 

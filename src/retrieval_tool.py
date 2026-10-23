@@ -1,11 +1,5 @@
-"""
-_____________________________
-  Author: Claude Assistant
-   Time : 2025/12/28
-   File : medical_text_retrieval.py
-   Desc : 医学临床文本/检查报告检索模块（优化版 - 合并LLM调用）
-______________________________
-"""
+from prompt_templates import render_prompt, system_prompt, retrieval_goal, RETRIEVAL_TASKS
+"Medical record and examination report retrieval with batched LLM calls. Original module: medical_text_retrieval.py, 2025-12-28."
 import os
 import re
 import json
@@ -21,14 +15,14 @@ import pandas as pd
 import numpy as np
 
 
-# 尝试导入项目依赖，如果不存在则使用占位符
+# Import project dependencies, using placeholders if unavailable.
 try:
     from logger import init_logger
     from time_util import TimeTracker, ThinkTracker, TokenTracker
     import llm_api_config
     from streaming_llm_handler import stream_openai_response, deepseek_stream_calling, qwen_stream_completion
 except ImportError:
-    # 如果导入失败，创建占位符
+    # Use placeholders when imports fail.
     init_logger = None
     TimeTracker = None
     ThinkTracker = None
@@ -36,14 +30,14 @@ except ImportError:
     llm_api_config = None
     deepseek_stream_calling = None
 
-# 尝试导入OpenAI客户端
+# Import the OpenAI client if available.
 try:
     from openai import OpenAI
 except ImportError:
     OpenAI = None
 
 
-# 设置日志
+# Configure logging.
 base_dir = os.path.split(os.path.realpath(__file__))[0]
 program = os.path.basename(sys.argv[0])
 logger = logging.getLogger(program)
@@ -59,7 +53,7 @@ if not logger.handlers:
 
 
 def create_dir_if_not_exist(dir_path: str) -> str:
-    """如果目录不存在则创建"""
+    "Create the directory if it does not exist."
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
     return dir_path
@@ -68,10 +62,10 @@ def create_dir_if_not_exist(dir_path: str) -> str:
 
 @dataclass
 class RetrievalResult:
-    """检索结果数据类"""
+    "Container for retrieval results."
     success: bool
     data: List[Dict[str, Any]] = field(default_factory=list)
-    field_empty: bool = True  # 标记是否因未找到字段而为空
+    field_empty: bool = True  # Indicate an empty result caused by missing fields.
     error_message: str = ""
     # thinking: str = ""
     source_file: str = ""
@@ -80,24 +74,10 @@ class RetrievalResult:
     field_extraction_reason: str = ""
 
 
-# ==================== 数据库检索工具类 ====================
+# Data-directory retrieval utilities
 
 class DataPathRetriever:
-    """
-    数据库路径检索工具类
-    用于在多级目录结构中查找患者数据、文档和缺失文件
-    
-    目录结构假设:
-    - data_dir/
-        - center1/
-            - patient1/
-                - doc1.csv
-                - doc2.pdf
-            - patient2/
-                ...
-        - center2/
-            ...
-    """
+    "Locate patient data, documents and missing files in a hierarchy of data_dir/center/patient/document.csv or document.pdf."
 
     def __init__(
         self,
@@ -106,32 +86,16 @@ class DataPathRetriever:
         raw_pdf_extract_dir: str = "../data/raw_pdf_extract",
         interim_dir: str = "../data/interim"
     ):
-        """
-        初始化数据路径检索器
-
-        Args:
-            raw_dir: 原始数据目录（包含PDF等原始文件）
-            raw_processed_dir: 处理后数据目录（清洗后的CSV）
-            raw_pdf_extract_dir: PDF提取数据目录
-            interim_dir: 中间数据目录
-        """
+        "Initialize source, cleaned, extracted and interim data paths using raw_dir, raw_processed_dir, raw_pdf_extract_dir and interim_dir."
         self.raw_dir = Path(raw_dir)
         self.raw_processed_dir = Path(raw_processed_dir)
         self.raw_pdf_extract_dir = Path(raw_pdf_extract_dir)
         self.interim_dir = Path(interim_dir)
 
-    # ==================== 基础目录操作 ====================
+    # Basic directory operations
 
     def get_data_centers(self, base_dir: Path = None) -> List[str]:
-        """
-        获取数据中心列表
-        
-        Args:
-            base_dir: 基础目录，默认使用 raw_processed_dir
-            
-        Returns:
-            数据中心名称列表
-        """
+        "Return center names under base_dir, defaulting to raw_processed_dir."
         if base_dir is None:
             base_dir = self.raw_processed_dir
         
@@ -143,16 +107,7 @@ class DataPathRetriever:
         return [d.name for d in base_dir.iterdir() if d.is_dir()]
 
     def get_patients_in_center(self, center: str, base_dir: Path = None) -> List[str]:
-        """
-        获取指定数据中心中的所有患者
-        
-        Args:
-            center: 数据中心名称
-            base_dir: 基础目录，默认使用 raw_processed_dir
-            
-        Returns:
-            患者名称列表
-        """
+        "Return patient names in center under base_dir, defaulting to raw_processed_dir."
         if base_dir is None:
             base_dir = self.raw_processed_dir
             
@@ -165,15 +120,7 @@ class DataPathRetriever:
         return [p.name for p in center_path.iterdir() if p.is_dir()]
 
     def get_all_patients(self, base_dir: Path = None) -> Dict[str, List[str]]:
-        """
-        获取所有数据中心的所有患者
-        
-        Args:
-            base_dir: 基础目录，默认使用 raw_processed_dir
-            
-        Returns:
-            字典 {center: [patient1, patient2, ...], ...}
-        """
+        "Return {center: [patient, ...]} for all centers under base_dir, defaulting to raw_processed_dir."
         result = {}
         centers = self.get_data_centers(base_dir)
         for center in centers:
@@ -182,7 +129,7 @@ class DataPathRetriever:
                 result[center] = patients
         return result
 
-    # ==================== 患者查找方法 ====================
+    # Patient lookup methods
 
     def find_patient_in_center(
         self, 
@@ -190,28 +137,18 @@ class DataPathRetriever:
         center: str, 
         patient_name: str
     ) -> Optional[Tuple[str, Path]]:
-        """
-        在指定的数据中心中查找患者
-        
-        Args:
-            base_dir: 基础目录
-            center: 数据中心名称
-            patient_name: 患者姓名
-            
-        Returns:
-            (center, patient_path) 或 None
-        """
+        "Find patient_name in center under base_dir. Return (center, patient_path), or None."
         if isinstance(base_dir, str):
             base_dir = Path(base_dir)
             
         center_path = base_dir / center
         if not center_path.exists():
-            logger.warning(f"数据中心 {center} 不存在于 {base_dir}")
+            logger.warning(f"""Data center {center} does not exist in {base_dir}""")
             return None
             
         patient_path = center_path / patient_name
         if patient_path.exists() and patient_path.is_dir():
-            logger.info(f"在 {center} 找到患者 {patient_name}")
+            logger.info(f"""Found patient {patient_name} in {center}""")
             return (center, patient_path)
         return None
 
@@ -221,17 +158,7 @@ class DataPathRetriever:
         patient_name: str,
         center: str = None
     ) -> Optional[Tuple[str, Path]]:
-        """
-        在目录中查找患者（可指定或遍历所有中心）
-        
-        Args:
-            base_dir: 基础目录
-            patient_name: 患者姓名
-            center: 指定数据中心（可选）
-            
-        Returns:
-            (center, patient_path) 或 None
-        """
+        "Find patient_name under base_dir, searching the specified center or all centers. Return (center, patient_path), or None."
         if isinstance(base_dir, str):
             base_dir = Path(base_dir)
             
@@ -243,7 +170,7 @@ class DataPathRetriever:
             center_path = base_dir / c
             patient_path = center_path / patient_name
             if patient_path.exists() and patient_path.is_dir():
-                logger.info(f"在 {c} 找到患者 {patient_name}")
+                logger.info(f"""Found patient {patient_name} in {c}""")
                 return (c, patient_path)
         return None
 
@@ -252,16 +179,7 @@ class DataPathRetriever:
         patient_name: str,
         center: str = None
     ) -> Optional[Tuple[str, Path]]:
-        """
-        在 raw 目录中查找患者
-        
-        Args:
-            patient_name: 患者姓名
-            center: 指定数据中心（可选）
-            
-        Returns:
-            (center, patient_path) 或 None
-        """
+        "Find patient_name in raw, optionally restricted to center. Return (center, patient_path), or None."
         return self.find_patient_in_dir(self.raw_dir, patient_name, center)
 
     def find_patient_in_processed(
@@ -269,16 +187,7 @@ class DataPathRetriever:
         patient_name: str,
         center: str = None
     ) -> Optional[Tuple[str, Path]]:
-        """
-        在 raw_processed 目录中查找患者
-        
-        Args:
-            patient_name: 患者姓名
-            center: 指定数据中心（可选）
-            
-        Returns:
-            (center, patient_path) 或 None
-        """
+        "Find patient_name in raw_processed, optionally restricted to center. Return (center, patient_path), or None."
         return self.find_patient_in_dir(self.raw_processed_dir, patient_name, center)
 
     def find_patient_in_pdf_extract(
@@ -286,16 +195,7 @@ class DataPathRetriever:
         patient_name: str,
         center: str = None
     ) -> Optional[Tuple[str, Path]]:
-        """
-        在 raw_pdf_extract 目录中查找患者
-        
-        Args:
-            patient_name: 患者姓名
-            center: 指定数据中心（可选）
-            
-        Returns:
-            (center, patient_path) 或 None
-        """
+        "Find patient_name in raw_pdf_extract, optionally restricted to center. Return (center, patient_path), or None."
         return self.find_patient_in_dir(self.raw_pdf_extract_dir, patient_name, center)
 
     def find_patient_across_dirs(
@@ -303,43 +203,21 @@ class DataPathRetriever:
         patient_name: str,
         center: str = None
     ) -> Dict[str, Optional[Tuple[str, Path]]]:
-        """
-        在所有数据目录中查找患者
-        
-        Args:
-            patient_name: 患者姓名
-            center: 指定数据中心（可选）
-            
-        Returns:
-            {
-                'raw': (center, path) or None,
-                'raw_processed': (center, path) or None,
-                'raw_pdf_extract': (center, path) or None
-            }
-        """
+        "Find patient_name across data directories, optionally restricted to center. Return a dictionary with raw, raw_processed and raw_pdf_extract entries, each containing (center, path) or None."
         return {
             'raw': self.find_patient_in_raw(patient_name, center),
             'raw_processed': self.find_patient_in_processed(patient_name, center),
             'raw_pdf_extract': self.find_patient_in_pdf_extract(patient_name, center)
         }
 
-    # ==================== 文档操作方法 ====================
+    # Document operations
 
     def get_doc_names_from_dir(
         self, 
         dir_path: Path, 
         extension: str = None
     ) -> set:
-        """
-        获取目录中指定扩展名的文档基础名（不含扩展名）
-        
-        Args:
-            dir_path: 目录路径
-            extension: 文件扩展名（如 '.pdf', '.csv'），为 None 则获取所有文件
-            
-        Returns:
-            文档基础名集合
-        """
+        "Return document stems in dir_path for extension, or all file types when extension is None."
         if isinstance(dir_path, str):
             dir_path = Path(dir_path)
             
@@ -358,16 +236,7 @@ class DataPathRetriever:
         patient_path: Path,
         extensions: List[str] = None
     ) -> Dict[str, List[str]]:
-        """
-        获取患者目录中的所有文档，按扩展名分类
-        
-        Args:
-            patient_path: 患者目录路径
-            extensions: 要查找的扩展名列表，默认为 ['.csv', '.pdf', '.PDF']
-            
-        Returns:
-            {extension: [doc_names], ...}
-        """
+        "Group document names in patient_path by extensions, defaulting to .csv, .pdf and .PDF. Return {extension: [document_names]}."
         if isinstance(patient_path, str):
             patient_path = Path(patient_path)
             
@@ -387,28 +256,18 @@ class DataPathRetriever:
         processed_path: Path,
         progress_note_split: bool = True
     ) -> List[str]:
-        """
-        查找在 raw 目录中存在但在 processed 目录中缺失的文档
-        
-        Args:
-            raw_path: raw 目录中患者的路径
-            processed_path: processed 目录中患者的路径
-            progress_note_split: 是否考虑病程记录的术前/术后拆分
-            
-        Returns:
-            缺失的文档名列表
-        """
+        "Return document names present in raw_path but absent from processed_path. progress_note_split determines whether preoperative/postoperative split notes count as present."
         if isinstance(raw_path, str):
             raw_path = Path(raw_path)
         if isinstance(processed_path, str):
             processed_path = Path(processed_path)
 
-        # 获取 raw 目录中的所有文档（PDF和CSV）
+        # List all PDF and CSV documents in raw.
         raw_pdf_names = self.get_doc_names_from_dir(raw_path, '.pdf')
         raw_pdf_names.update(self.get_doc_names_from_dir(raw_path, '.PDF'))
         raw_pdf_names.update(self.get_doc_names_from_dir(raw_path, '.csv'))
         
-        # 获取 processed 目录中的 CSV 文档
+        # List CSV documents in processed data.
         processed_csv_names = self.get_doc_names_from_dir(processed_path, '.csv')
 
         missing_docs = set()
@@ -416,18 +275,18 @@ class DataPathRetriever:
             if doc_name in processed_csv_names:
                 continue
                 
-            # 特殊处理：病程记录 与 术前病程记录/术后病程记录 视为一致
-            if progress_note_split and "病程记录" in doc_name:
-                pre_op_name = f"术前{doc_name}"
-                post_op_name = f"术后{doc_name}"
+            # Treat split preoperative/postoperative progress notes as an available progress-note document.
+            if progress_note_split and "Progress notes" in doc_name:
+                pre_op_name = f"Preoperative_{doc_name}"
+                post_op_name = f"Postoperative_{doc_name}"
                 if pre_op_name in processed_csv_names or post_op_name in processed_csv_names:
-                    logger.info(f"'{doc_name}' 已有术前/术后拆分版本，跳过")
+                    logger.info(f"""'{doc_name}' already has preoperative/postoperative split versions; skipping""")
                     continue
                     
             missing_docs.add(doc_name)
 
         if missing_docs:
-            logger.info(f"发现 {len(missing_docs)} 个缺失的文档: {missing_docs}")
+            logger.info(f"""Found {len(missing_docs)} missing documents: {missing_docs}""")
 
         return list(missing_docs)
 
@@ -436,23 +295,7 @@ class DataPathRetriever:
         patient_name: str,
         center: str = None
     ) -> Dict[str, Any]:
-        """
-        检查患者数据的完整性
-        
-        Args:
-            patient_name: 患者姓名
-            center: 数据中心（可选）
-            
-        Returns:
-            {
-                'raw_exists': bool,
-                'processed_exists': bool,
-                'pdf_extract_exists': bool,
-                'missing_docs': List[str],
-                'raw_docs': List[str],
-                'processed_docs': List[str]
-            }
-        """
+        "Check completeness for patient_name and optional center. Return existence flags raw_exists, processed_exists and pdf_extract_exists, and lists missing_docs, raw_docs and processed_docs."
         result = {
             'raw_exists': False,
             'processed_exists': False,
@@ -462,7 +305,7 @@ class DataPathRetriever:
             'processed_docs': []
         }
         
-        # 查找患者在各目录的位置
+        # Locate the patient in each data directory.
         locations = self.find_patient_across_dirs(patient_name, center)
         
         if locations['raw']:
@@ -482,7 +325,7 @@ class DataPathRetriever:
         if locations['raw_pdf_extract']:
             result['pdf_extract_exists'] = True
             
-        # 计算缺失文档
+        # Identify missing documents.
         if locations['raw'] and locations['raw_processed']:
             _, raw_path = locations['raw']
             _, processed_path = locations['raw_processed']
@@ -490,19 +333,10 @@ class DataPathRetriever:
             
         return result
 
-    # ==================== 目录列表方法 ====================
+    # Directory listing methods
 
     def list_all_centers(self) -> Dict[str, List[str]]:
-        """
-        列出所有数据目录中的数据中心
-        
-        Returns:
-            {
-                'raw': [centers],
-                'raw_processed': [centers],
-                'raw_pdf_extract': [centers]
-            }
-        """
+        "Return center lists for raw, raw_processed and raw_pdf_extract."
         return {
             'raw': self.get_data_centers(self.raw_dir),
             'raw_processed': self.get_data_centers(self.raw_processed_dir),
@@ -515,17 +349,7 @@ class DataPathRetriever:
         center: str = None,
         data_type: str = 'processed'
     ) -> Optional[Path]:
-        """
-        获取患者数据目录路径
-        
-        Args:
-            patient_name: 患者姓名
-            center: 数据中心（可选）
-            data_type: 数据类型 ('raw', 'processed', 'pdf_extract')
-            
-        Returns:
-            患者目录路径或 None
-        """
+        "Return the patient directory for patient_name, optional center and data_type (raw, processed or pdf_extract), or None if absent."
         if data_type == 'raw':
             result = self.find_patient_in_raw(patient_name, center)
         elif data_type == 'processed':
@@ -533,7 +357,7 @@ class DataPathRetriever:
         elif data_type == 'pdf_extract':
             result = self.find_patient_in_pdf_extract(patient_name, center)
         else:
-            logger.warning(f"未知的数据类型: {data_type}")
+            logger.warning(f"""Unknown data type: {data_type}""")
             return None
             
         if result:
@@ -543,22 +367,22 @@ class DataPathRetriever:
 
 
 class MedicalRetriever:
-    """医学临床文本/检查报告检索类"""
+    "Retrieve clinical records and examination reports."
 
-    # Token估算常量（中文约1.5-2个字符/token，英文约4个字符/token）
+    # Token estimates: approximately 1.5-2 CJK characters or 4 English characters per token.
     CHARS_PER_TOKEN_CN = 1.8
     CHARS_PER_TOKEN_EN = 4.0
 
-    # 默认最大token限制（留出输出空间）
+    # Default token limit, reserving space for the response
     DEFAULT_MAX_INPUT_TOKENS = 6000
 
-    # 字段值截断长度
+    # Maximum field-value preview length
     MAX_FIELD_VALUE_LENGTH = 100
 
-    # 提示词基础token开销（不含文档内容）
+    # Base prompt token overhead, excluding document content
     PROMPT_BASE_TOKENS = 800
 
-    # 默认文件扩展名
+    # Default file extension
     DEFAULT_EXTENSION = '.csv'
 
     def __init__(
@@ -570,17 +394,7 @@ class MedicalRetriever:
         max_input_tokens: int = None,
         default_extension: str = None
     ):
-        """
-        初始化检索器
-
-        Args:
-            data_dir: 数据根目录，包含各个数据中心
-            output_dir: 输出目录
-            supported_extensions: 支持的文件扩展名列表
-            print_thinking: 是否打印大模型思考过程
-            max_input_tokens: 最大输入token数，防止超限
-            default_extension: 默认文件扩展名（当文档名无扩展名时使用）
-        """
+        "Initialize retrieval using data_dir, output_dir, supported_extensions, print_thinking, max_input_tokens and default_extension. The token limit constrains model input; the default extension applies to names without one."
         self.data_dir = data_dir
         self.output_dir = output_dir
         self.supported_extensions = supported_extensions or ['.csv', '.txt', '.json', '.xlsx', '.xls', '.md']
@@ -589,26 +403,18 @@ class MedicalRetriever:
         self.max_input_tokens = max_input_tokens or self.DEFAULT_MAX_INPUT_TOKENS
         self.default_extension = default_extension or self.DEFAULT_EXTENSION
 
-    # ==================== Token估算方法 ====================
+    # Token estimation methods
 
     def _estimate_tokens(self, text: str) -> int:
-        """
-        估算文本的token数量
-
-        Args:
-            text: 输入文本
-
-        Returns:
-            估算的token数量
-        """
+        "Return an estimated token count for text."
         if not text:
             return 0
 
-        # 分别统计中文和非中文字符
+        # Count CJK and other characters separately.
         cn_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
         other_chars = len(text) - cn_chars
 
-        # 估算token数
+        # Estimate the token count.
         cn_tokens = cn_chars / self.CHARS_PER_TOKEN_CN
         other_tokens = other_chars / self.CHARS_PER_TOKEN_EN
 
@@ -619,17 +425,8 @@ class MedicalRetriever:
         content_parts: List[Tuple[str, str, int]],  # [(doc_name, content, priority)]
         max_tokens: int
     ) -> List[Tuple[str, str]]:
-        """
-        根据token限制截断内容
-
-        Args:
-            content_parts: [(文档名, 内容, 优先级)] 优先级越小越重要
-            max_tokens: 最大token数
-
-        Returns:
-            截断后的[(文档名, 内容)]列表
-        """
-        # 按优先级排序
+        "Truncate content_parts, a list of (document_name, content, priority), to max_tokens. Lower priority values take precedence. Return (document_name, content) pairs."
+        # Sort by priority.
         sorted_parts = sorted(content_parts, key=lambda x: x[2])
 
         result = []
@@ -642,15 +439,15 @@ class MedicalRetriever:
                 result.append((doc_name, content))
                 current_tokens += content_tokens
             else:
-                # 计算剩余可用token
+                # Calculate the remaining token budget.
                 remaining_tokens = max_tokens - current_tokens
-                if remaining_tokens > 100:  # 至少保留100个token才值得截断
-                    # 按比例截断内容
+                if remaining_tokens > 100:  # Only truncate if at least 100 tokens remain.
+                    # Truncate content proportionally.
                     truncate_ratio = remaining_tokens / content_tokens
-                    truncate_len = int(len(content) * truncate_ratio * 0.9)  # 留10%余量
-                    truncated_content = content[:truncate_len] + "\n... [内容已截断]"
+                    truncate_len = int(len(content) * truncate_ratio * 0.9)  # Reserve a 10% margin.
+                    truncated_content = content[:truncate_len] + "\n... [Content truncated]"
                     result.append((doc_name, truncated_content))
-                    logger.warning(f"文档 {doc_name} 内容已截断以适应token限制")
+                    logger.warning(f"""Truncated document {doc_name} to fit the token limit""")
                 break
 
         return result
@@ -660,17 +457,8 @@ class MedicalRetriever:
         doc_summaries: List[Dict[str, Any]],
         max_tokens_per_batch: int
     ) -> List[List[Dict[str, Any]]]:
-        """
-        简单分批：按顺序将文档分成多批，超过token限制则开新批次
-
-        Args:
-            doc_summaries: 文档摘要列表
-            max_tokens_per_batch: 每批最大token数
-
-        Returns:
-            分批后的文档摘要列表 [[batch1_docs], [batch2_docs], ...]
-        """
-        # 可用于文档内容的token数（减去提示词基础开销）
+        "Partition doc_summaries sequentially into batches within max_tokens_per_batch. Return a list of document-summary batches."
+        # Document token budget after subtracting prompt overhead
         available_tokens = max_tokens_per_batch - self.PROMPT_BASE_TOKENS
 
         batches = []
@@ -681,7 +469,7 @@ class MedicalRetriever:
             doc_text = json.dumps(doc, ensure_ascii=False)
             doc_tokens = self._estimate_tokens(doc_text)
 
-            # 如果加入当前文档会超限，开新批次
+            # Start a new batch if adding this document would exceed the limit.
             if current_tokens + doc_tokens > available_tokens:
                 if current_batch:
                     batches.append(current_batch)
@@ -691,12 +479,12 @@ class MedicalRetriever:
                 current_batch.append(doc)
                 current_tokens += doc_tokens
 
-        # 别忘了最后一批
+        # Include the final batch.
         if current_batch:
             batches.append(current_batch)
 
         if len(batches) > 1:
-            logger.info(f"文档已分为 {len(batches)} 批处理，各批文档数: {[len(b) for b in batches]}")
+            logger.info(f"""Split documents into {len(batches)} batches; documents per batch: {[len(b) for b in batches]}""")
 
         return batches
 
@@ -705,9 +493,7 @@ class MedicalRetriever:
         doc: Dict[str, Any],
         max_tokens: int
     ) -> Dict[str, Any]:
-        """
-        截断单个文档摘要以适应token限制
-        """
+        "Truncate one document summary to fit the token limit."
         truncated_doc = {
             "document_name": doc["document_name"],
             "fields": []
@@ -721,11 +507,11 @@ class MedicalRetriever:
         for field in doc.get("fields", []):
             field_tokens = self._estimate_tokens(json.dumps(field, ensure_ascii=False))
 
-            if current_tokens + field_tokens <= max_tokens * 0.9:  # 留10%余量
+            if current_tokens + field_tokens <= max_tokens * 0.9:  # Reserve a 10% margin.
                 truncated_doc["fields"].append(field)
                 current_tokens += field_tokens
             else:
-                # 尝试截断字段值
+                # Truncate field values if needed.
                 truncated_field = {
                     "field_name": field["field_name"],
                     "value_preview": field.get("value_preview", "")[:30] + "..."
@@ -735,17 +521,17 @@ class MedicalRetriever:
 
         remaining = len(doc.get("fields", [])) - len(truncated_doc["fields"])
         if remaining > 0:
-            truncated_doc["truncated"] = f"还有{remaining}个字段未显示"
-            logger.warning(f"文档 {doc['document_name']} 字段已截断，保留{len(truncated_doc['fields'])}个")
+            truncated_doc["truncated"] = f"""{remaining} additional fields not shown"""
+            logger.warning(f"""Truncated fields in {doc['document_name']}; retained {len(truncated_doc['fields'])}""")
 
         return truncated_doc
 
-    # ==================== 目录扫描方法 ====================
+    # Directory scanning methods
 
     def get_centers(self) -> List[str]:
-        """获取所有数据中心列表"""
+        "List all data centers."
         if not os.path.exists(self.data_dir):
-            logger.error(f"数据目录不存在: {self.data_dir}")
+            logger.error(f"""Data directory does not exist: {self.data_dir}""")
             return []
 
         centers = [
@@ -755,10 +541,10 @@ class MedicalRetriever:
         return centers
 
     def get_patients(self, center: str) -> List[str]:
-        """获取指定中心下的所有患者（人名）列表"""
+        "List patients in the specified center."
         center_path = os.path.join(self.data_dir, center)
         if not os.path.exists(center_path):
-            logger.error(f"数据中心不存在: {center_path}")
+            logger.error(f"""Data center does not exist: {center_path}""")
             return []
 
         patients = [
@@ -768,10 +554,10 @@ class MedicalRetriever:
         return patients
 
     def get_documents(self, center: str, patient: str) -> List[str]:
-        """获取指定患者下的所有文档列表"""
+        "List documents for the specified patient."
         patient_path = os.path.join(self.data_dir, center, patient)
         if not os.path.exists(patient_path):
-            logger.error(f"患者目录不存在: {patient_path}")
+            logger.error(f"""Patient directory does not exist: {patient_path}""")
             return []
 
         documents = []
@@ -782,59 +568,41 @@ class MedicalRetriever:
         return documents
 
     def _has_extension(self, filename: str) -> bool:
-        """检查文件名是否有扩展名"""
+        "Check whether a filename includes an extension."
         _, ext = os.path.splitext(filename)
         return bool(ext)
 
     def _normalize_document_name(self, document_name: str) -> str:
-        """
-        规范化文档名，如果没有扩展名则添加默认扩展名
-
-        Args:
-            document_name: 原始文档名
-
-        Returns:
-            规范化后的文档名
-        """
+        "Normalize document_name by adding the default extension when absent."
         if not self._has_extension(document_name):
             return document_name + self.default_extension
         return document_name
 
     def get_document_path(self, center: str, patient: str, document_name: str) -> Optional[str]:
-        """
-        获取文档的完整路径
-
-        Args:
-            center: 数据中心名称
-            patient: 患者姓名
-            document_name: 文档名（如果没有扩展名，默认添加.csv）
-
-        Returns:
-            文档完整路径，找不到则返回None
-        """
+        "Return the document path for center, patient and document_name, adding .csv when the extension is absent. Return None if no file matches."
         patient_path = os.path.join(self.data_dir, center, patient)
 
-        # 1. 先尝试原始文档名
+        # 1. Try the original document name.
         doc_path = os.path.join(self.data_dir, center, patient, document_name)
         if os.path.exists(doc_path):
             return doc_path
 
-        # 2. 如果没有扩展名，尝试添加默认扩展名(.csv)
+        # 2. Add the default .csv extension when absent.
         if not self._has_extension(document_name):
             doc_path_with_ext = os.path.join(self.data_dir, center, patient, document_name + self.default_extension)
             if os.path.exists(doc_path_with_ext):
                 return doc_path_with_ext
 
-            # 3. 尝试其他支持的扩展名
+            # 3. Try other supported extensions.
             for ext in self.supported_extensions:
                 doc_path_with_ext = os.path.join(self.data_dir, center, patient, document_name + ext)
                 if os.path.exists(doc_path_with_ext):
                     return doc_path_with_ext
 
-        # 4. 尝试模糊匹配
+        # 4. Try partial-name matching.
         if os.path.exists(patient_path):
             for file in os.listdir(patient_path):
-                # 去掉扩展名后比较
+                # Compare names without extensions.
                 file_base = os.path.splitext(file)[0]
                 doc_base = os.path.splitext(document_name)[0]
                 if doc_base.lower() in file_base.lower() or file_base.lower() in doc_base.lower():
@@ -848,21 +616,11 @@ class MedicalRetriever:
         patient: str,
         pattern: str
     ) -> List[Tuple[str, str]]:
-        """
-        根据模式匹配获取文档列表
-
-        Args:
-            center: 数据中心名称
-            patient: 患者姓名
-            pattern: 匹配模式（支持部分匹配）
-
-        Returns:
-            List[(文档名, 文档路径)]
-        """
+        "Return (document_name, path) pairs matching pattern within center and patient. Partial-name matching is supported."
         all_docs = self.get_documents(center, patient)
         matched = []
 
-        # 去掉pattern的扩展名进行匹配
+        # Remove the pattern extension before matching.
         pattern_base = os.path.splitext(pattern)[0]
 
         for doc_name in all_docs:
@@ -874,20 +632,12 @@ class MedicalRetriever:
 
         return matched
 
-    # ==================== 文档读取方法 ====================
+    # Document reading methods
 
     def read_document(self, file_path: str) -> Tuple[str, Dict[str, Any]]:
-        """
-        读取文档内容
-
-        Args:
-            file_path: 文档路径
-
-        Returns:
-            (原始文本内容, 结构化数据字典)
-        """
+        "Read file_path and return (raw_text, structured_data)."
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"文件不存在: {file_path}")
+            raise FileNotFoundError(f"""File not found: {file_path}""")
 
         ext = os.path.splitext(file_path)[1].lower()
         raw_text = ""
@@ -925,15 +675,13 @@ class MedicalRetriever:
                 structured_data = {"raw_content": raw_text}
 
         except Exception as e:
-            logger.error(f"读取文件失败 {file_path}: {str(e)}")
+            logger.error(f"""Failed to read file {file_path}: {str(e)}""")
             raise
 
         return raw_text, structured_data
 
     def _parse_medical_text(self, text: str) -> Dict[str, Any]:
-        """
-        解析医学文本，提取字段和值
-        """
+        "Parse clinical text into fields and values."
         result = {}
         lines = text.split('\n')
         current_field = None
@@ -972,7 +720,7 @@ class MedicalRetriever:
         return result
 
     def _parse_markdown_text(self, text: str) -> Dict[str, Any]:
-        """解析Markdown格式的医学文本"""
+        "Parse clinical text in Markdown format."
         result = {}
         sections = re.split(r'^#+\s+', text, flags=re.MULTILINE)
 
@@ -989,14 +737,14 @@ class MedicalRetriever:
         return result
 
     def _format_value(self, value_list: List[str]) -> Union[str, List[str]]:
-        """格式化字段值"""
+        "Format a field value."
         if len(value_list) == 1:
             return value_list[0]
         elif len(value_list) > 1:
             return value_list
         return ""
 
-    # ==================== 精确检索方法 ====================
+    # Exact field retrieval methods
 
     def retrieve_by_field(
         self,
@@ -1005,15 +753,7 @@ class MedicalRetriever:
         document_name: str,
         field_names: Union[str, List[str]]
     ) -> RetrievalResult:
-        """
-        精确检索：根据指定的center、人名、文档名、字段名检索内容
-
-        Args:
-            center: 数据中心名称
-            patient: 患者姓名
-            document_name: 文档名（如果没有扩展名，默认添加.csv）
-            field_names: 字段名或字段名列表
-        """
+        "Retrieve field_names, either one name or a list, from document_name for center and patient. Add the default .csv extension when absent."
         if isinstance(field_names, str):
             field_names = [field_names]
 
@@ -1021,7 +761,7 @@ class MedicalRetriever:
         if not doc_path:
             return RetrievalResult(
                 success=False,
-                error_message=f"找不到文档: center={center}, patient={patient}, document={document_name}"
+                error_message=f"""Document not found: center={center}, patient={patient}, document={document_name}"""
             )
 
         try:
@@ -1029,17 +769,17 @@ class MedicalRetriever:
         except Exception as e:
             return RetrievalResult(
                 success=False,
-                error_message=f"读取文档失败: {str(e)}"
+                error_message=f"""Failed to read document: {str(e)}"""
             )
 
         result_data = []
         not_found_fields = []
 
-        # 获取实际的文档名（从路径中提取）
+        # Use the actual document name from its path.
         actual_doc_name = os.path.basename(doc_path)
 
         if isinstance(structured_data, dict):
-            # 键值对数据：每个字段一条记录
+            # Key-value data: one record per field.
             for field_name in field_names:
                 if field_name in structured_data:
                     result_data.append({
@@ -1050,7 +790,7 @@ class MedicalRetriever:
                     not_found_fields.append(field_name)
 
         elif isinstance(structured_data, list):
-            # 表格数据：保留记录结构，筛选指定字段
+            # Tabular data: retain record structure and select requested fields.
             found_fields = set()
             for record in structured_data:
                 if isinstance(record, dict):
@@ -1068,18 +808,18 @@ class MedicalRetriever:
             return RetrievalResult(
                 success=True,
                 data=result_data,
-                field_empty=False,  # 成功且有数据
+                field_empty=False,  # Successful retrieval with data
                 source_file=doc_path,
                 source_documents=[actual_doc_name],
-                error_message=f"未找到字段: {not_found_fields}" if not_found_fields else ""
+                error_message=f"""Fields not found: {not_found_fields}""" if not_found_fields else ""
             )
         else:
-            # 修改重点：Success=True, 但 field_empty=True
+            # Return success=True and field_empty=True when no fields match.
             return RetrievalResult(
-                success=True,  # 执行成功
+                success=True,  # The operation completed successfully.
                 data=[],
-                field_empty=True,  # 结果为空
-                error_message=f"在文档中未找到任何指定字段: {field_names}",  # 这里的msg仅作为提示
+                field_empty=True,  # The result is empty.
+                error_message=f"""None of the specified fields were found: {field_names}""",  # This message is informational.
                 source_file=doc_path,
                 source_documents=[os.path.basename(doc_path)]
             )
@@ -1090,19 +830,12 @@ class MedicalRetriever:
         patient: str,
         document_name: str
     ) -> RetrievalResult:
-        """
-        检索文档的所有字段
-
-        Args:
-            center: 数据中心名称
-            patient: 患者姓名
-            document_name: 文档名（如果没有扩展名，默认添加.csv）
-        """
+        "Retrieve every field from document_name for center and patient, adding the default .csv extension when absent."
         doc_path = self.get_document_path(center, patient, document_name)
         if not doc_path:
             return RetrievalResult(
                 success=False,
-                error_message=f"找不到文档: center={center}, patient={patient}, document={document_name}"
+                error_message=f"""Document not found: center={center}, patient={patient}, document={document_name}"""
             )
 
         try:
@@ -1110,12 +843,12 @@ class MedicalRetriever:
             print(structured_data)
             actual_doc_name = os.path.basename(doc_path)
 
-            # 转换为records格式
+            # Convert to records format.
             if isinstance(structured_data, dict):
-                # 键值对数据
+                # Key-value data
                 result_data = [{'field': k, 'value': v} for k, v in structured_data.items()]
             elif isinstance(structured_data, list):
-                # 已经是records格式，直接使用
+                # Data are already in records format.
                 result_data = structured_data
             else:
                 result_data = []
@@ -1129,10 +862,10 @@ class MedicalRetriever:
         except Exception as e:
             return RetrievalResult(
                 success=False,
-                error_message=f"读取文档失败: {str(e)}"
+                error_message=f"""Failed to read document: {str(e)}"""
             )
 
-    # ==================== 智能检索方法（基于LLM）====================
+    # LLM-assisted semantic retrieval methods
 
     def retrieve_by_llm(
         self,
@@ -1143,24 +876,7 @@ class MedicalRetriever:
         document_names: Optional[Union[str, List[str]]] = None,
         max_retries: int = 3
     ) -> RetrievalResult:
-        """
-        智能检索：调用大模型检索相关字段和内容（优化版 - 合并调用）
-
-        两种检索模式：
-        1. 按search_condition筛选文档：根据条件找到相关文档，再提取字段
-        2. 按document_names指定文档：直接在指定文档中提取字段
-
-        Args:
-            center: 数据中心名称
-            patient: 患者姓名
-            task_goal: 任务目标（用于字段提取）
-            search_condition: 搜索条件（如"术前"、"入院"等）
-            document_names: 指定的文档名称（单个或列表，如果没有扩展名默认添加.csv）
-            max_retries: 最大重试次数
-
-        Returns:
-            RetrievalResult: 检索结果
-        """
+        "Retrieve fields with an LLM. Select documents by search_condition or use document_names directly, then select fields according to task_goal. center and patient identify the data; max_retries limits attempts. Return a RetrievalResult."
         if isinstance(document_names, str):
             document_names = [document_names]
 
@@ -1168,10 +884,10 @@ class MedicalRetriever:
         if not all_doc_names:
             return RetrievalResult(
                 success=False,
-                error_message=f"未找到任何文档: center={center}, patient={patient}"
+                error_message=f"""No documents found: center={center}, patient={patient}"""
             )
 
-        # ========== 阶段1：文档筛选 ==========
+        # Stage 1: Document selection
         if document_names:
             selected_docs = []
             for doc_name in document_names:
@@ -1186,10 +902,10 @@ class MedicalRetriever:
             if not selected_docs:
                 return RetrievalResult(
                     success=False,
-                    error_message=f"找不到指定的文档: {document_names}"
+                    error_message=f"""Specified documents not found: {document_names}"""
                 )
 
-            doc_selection_reason = f"使用指定的文档: {[d[0] for d in selected_docs]}"
+            doc_selection_reason = f"""Using specified documents: {[d[0] for d in selected_docs]}"""
 
         elif search_condition:
             selected_docs, doc_selection_reason = self._select_documents_by_condition(
@@ -1201,21 +917,21 @@ class MedicalRetriever:
             )
 
             if not selected_docs:
-                # 修改重点：如果按条件没找到文档，这不算系统错误，而是“结果为空”
+                # No matching documents is an empty result, not a system error.
                 return RetrievalResult(
-                    success=True,  # 流程是通的
+                    success=True,  # The retrieval operation completed.
                     data=[],
-                    field_empty=True,  # 没文档自然没字段，标记为空
-                    error_message=f"根据条件'{search_condition}'未找到相关文档",
+                    field_empty=True,  # No documents means no fields; mark the result empty.
+                    error_message=f"""No documents matched condition '{search_condition}'""",
                     document_selection_reason=doc_selection_reason
                 )
         else:
             return RetrievalResult(
                 success=False,
-                error_message="必须指定search_condition或document_names之一"
+                error_message="Specify either search_condition or document_names"
             )
 
-        # ========== 阶段2：读取文档并提取字段（合并调用）==========
+        # Stage 2: Read documents and select fields in a combined call.
         all_content = {}
         for doc_name, doc_path in selected_docs:
             try:
@@ -1226,18 +942,18 @@ class MedicalRetriever:
                     "path": doc_path
                 }
             except Exception as e:
-                logger.warning(f"读取文档失败 {doc_name}: {str(e)}")
+                logger.warning(f"""Failed to read document {doc_name}: {str(e)}""")
                 continue
 
         if not all_content:
             return RetrievalResult(
                 success=False,
-                error_message="无法读取任何选中的文档内容",
+                error_message="Unable to read any selected document",
                 source_documents=[d[0] for d in selected_docs],
                 document_selection_reason=doc_selection_reason
             )
 
-        # 合并调用LLM提取字段
+        # Select fields with a combined LLM call.
         for attempt in range(max_retries):
             try:
                 result = self._extract_fields_by_llm_batch(
@@ -1253,16 +969,16 @@ class MedicalRetriever:
                         validated_result.document_selection_reason = doc_selection_reason
                         return validated_result
                     else:
-                        logger.warning(f"第{attempt + 1}次检索结果验证失败: {validated_result.error_message}")
+                        logger.warning(f"""Retrieval attempt {attempt + 1} failed validation: {validated_result.error_message}""")
                 else:
-                    logger.warning(f"第{attempt + 1}次LLM检索失败: {result.error_message}")
+                    logger.warning(f"""LLM retrieval attempt {attempt + 1} failed: {result.error_message}""")
 
             except Exception as e:
-                logger.error(f"第{attempt + 1}次LLM调用异常: {str(e)}")
+                logger.error(f"""LLM call attempt {attempt + 1} raised an exception: {str(e)}""")
 
         return RetrievalResult(
             success=False,
-            error_message=f"经过{max_retries}次尝试后仍无法成功检索",
+            error_message=f"""Retrieval failed after {max_retries} attempts""",
             source_documents=list(all_content.keys()),
             document_selection_reason=doc_selection_reason
         )
@@ -1275,8 +991,8 @@ class MedicalRetriever:
         search_condition: str,
         max_retries: int = 3
     ) -> Tuple[List[Tuple[str, str]], str]:
-        """根据搜索条件选择相关文档"""
-        # 首先尝试简单的关键词匹配
+        "Select relevant documents using a search condition."
+        # First try simple keyword matching.
         # keyword_matched = []
         # for doc_name in all_doc_names:
         #     if search_condition.lower() in doc_name.lower():
@@ -1285,10 +1001,10 @@ class MedicalRetriever:
         #             keyword_matched.append((doc_name, doc_path))
         #
         # if keyword_matched:
-        #     reason = f"通过关键词'{search_condition}'直接匹配到文档: {[d[0] for d in keyword_matched]}"
+        # A keyword match can provide a direct document-selection rationale.
         #     return keyword_matched, reason
 
-        # 如果关键词匹配失败，调用LLM进行智能选择
+        # Use LLM selection when keyword matching fails.
         for attempt in range(max_retries):
             try:
                 result = self._llm_select_documents(
@@ -1304,13 +1020,13 @@ class MedicalRetriever:
                             selected.append((doc_name, doc_path))
 
                     if selected:
-                        reason = result.get('reason', f"LLM根据条件'{search_condition}'选择了文档")
+                        reason = result.get('reason', f"""LLM selected documents for condition '{search_condition}'""")
                         return selected, reason
 
             except Exception as e:
-                logger.info(f"第{attempt + 1}次文档选择异常: {str(e)}")
+                logger.info(f"""Document selection attempt {attempt + 1} raised an exception: {str(e)}""")
 
-        return [], f"无法找到与条件'{search_condition}'相关的文档"
+        return [], f"""No documents found for condition '{search_condition}'"""
 
     def _llm_select_documents(
         self,
@@ -1318,49 +1034,17 @@ class MedicalRetriever:
         search_condition: str,
         model: str = 'qwen3-max',
     ) -> Optional[Dict[str, Any]]:
-        """调用LLM选择相关文档"""
+        "Call the LLM to select relevant records."
 
-        prompt = f"""你是一位资深医学数据分析专家，精通临床医学和医学信息学。
-
-请根据搜索条件，从以下文档列表中选择最相关的文档。
-
-搜索条件: {search_condition}
-
-可用文档列表:
-{json.dumps(all_doc_names, ensure_ascii=False, indent=2)}
-
-请分析每个文档名称，选择与搜索条件最相关的文档。
-
-常见的医学文档类型参考:
-- 术前: 术前检查、术前评估、术前记录、术前检验
-- 术后: 术后记录、术后随访、术后检查
-- 入院: 入院记录、入院评估、首次病程记录
-- 出院: 出院记录、出院小结、出院诊断
-- 手术: 手术记录、手术同意书、麻醉记录
-- 检验: 血常规、生化、凝血功能、感染指标
-- 影像: CT报告、MRI报告、X线报告、超声报告
-- 病程: 病程记录、护理记录、查房记录
-
-请以JSON格式返回结果:
-{{
-    "reason": "选择这些文档的理由",
-    "selected_documents": ["文档1", "文档2"]
-}}
-
-如果没有找到相关文档，请返回:
-{{
-    "reason": "说明为什么没有找到相关文档",
-    "selected_documents": []
-}}
-"""
+        prompt = render_prompt("record_selection", **{"available curated record list": json.dumps(all_doc_names, ensure_ascii=False, indent=2), "record-level search condition": search_condition})
         return self._call_llm_api(
             prompt=prompt,
             print_thinking=self.print_thinking,
             model =model,
-            task_name=f"文档选择 - {search_condition}"
+            task_name=f"""Record selection - {search_condition}"""
         )
 
-    # ==================== 批量字段提取方法 ====================
+    # Batched field selection methods
 
     def _extract_fields_by_llm_batch(
         self,
@@ -1368,23 +1052,16 @@ class MedicalRetriever:
         task_goal: str,
         search_condition: Optional[str] = None
     ) -> RetrievalResult:
-        """
-        批量调用LLM从多个文档中提取相关字段（简化版 - 顺序分批）
-
-        Args:
-            all_content: 文档内容字典 {doc_name: {raw_text, structured_data, path}}
-            task_goal: 任务目标
-            search_condition: 可选的搜索条件
-        """
-        # 构建优化的文档摘要
+        "Select fields from all_content in sequential LLM batches. all_content maps document names to raw_text, structured_data and path; task_goal specifies the field-selection objective; search_condition is optional."
+        # Build compact document summaries.
         doc_summaries, total_tokens = self._build_optimized_doc_summary(all_content)
 
-        # 计算可用于文档内容的token数
+        # Calculate the document token budget.
         available_tokens = self.max_input_tokens - self.PROMPT_BASE_TOKENS
 
-        # 检查是否需要分批
+        # Determine whether batching is needed.
         if total_tokens <= available_tokens:
-            # 单批处理
+            # Single-batch processing
             return self._process_single_batch(
                 doc_summaries=doc_summaries,
                 all_content=all_content,
@@ -1392,8 +1069,8 @@ class MedicalRetriever:
                 search_condition=search_condition
             )
         else:
-            # 分批处理
-            logger.info(f"文档总token({total_tokens})超过限制({available_tokens})，启用分批处理")
+            # Multiple-batch processing
+            logger.info(f"""Document tokens ({total_tokens}) exceed the limit ({available_tokens}); using batches""")
             return self._process_multiple_batches(
                 doc_summaries=doc_summaries,
                 all_content=all_content,
@@ -1408,7 +1085,7 @@ class MedicalRetriever:
         task_goal: str,
         search_condition: Optional[str]
     ) -> RetrievalResult:
-        """处理单批文档"""
+        "Process one document batch."
         prompt = self._build_batch_extraction_prompt(
             doc_summaries=doc_summaries,
             task_goal=task_goal,
@@ -1418,13 +1095,13 @@ class MedicalRetriever:
         llm_response = self._call_llm_api(
             prompt=prompt,
             print_thinking=self.print_thinking,
-            task_name=f"字段提取 - {task_goal}..."
+            task_name=f"""Field selection - {task_goal}..."""
         )
 
         if llm_response is None:
             return RetrievalResult(
                 success=False,
-                error_message="LLM API调用失败"
+                error_message="LLM API call failed"
             )
 
         return self._parse_extraction_response(llm_response, all_content)
@@ -1436,42 +1113,40 @@ class MedicalRetriever:
         task_goal: str,
         search_condition: Optional[str]
     ) -> RetrievalResult:
-        """
-        处理多批文档，合并结果
-        """
-        # 简单顺序分批
+        "Process multiple document batches and merge results."
+        # Partition documents sequentially.
         batches = self._split_documents_into_batches(
             doc_summaries=doc_summaries,
             max_tokens_per_batch=self.max_input_tokens
         )
 
         total_batches = len(batches)
-        logger.info(f"共分为 {total_batches} 批处理")
+        logger.info(f"""Split into {total_batches} batches""")
 
         if self.print_thinking:
-            print(f"\n📊 分批信息: 总文档数 {len(doc_summaries)}，分为 {total_batches} 批")
+            print(f"""\nBatch details: {len(doc_summaries)} documents in {total_batches} batches""")
 
-        # 处理每个批次
+        # Process each batch.
         all_selected_fields = []
         all_reasons = []
 
         for i, batch_docs in enumerate(batches):
             if self.print_thinking:
                 print(f"\n{'='*50}")
-                print(f"📦 处理批次 {i+1}/{total_batches} ({len(batch_docs)}个文档)")
+                print(f"""Processing batch {i+1}/{total_batches} ({len(batch_docs)} documents)""")
                 print(f"{'='*50}")
 
             prompt = self._build_batch_extraction_prompt(
                 doc_summaries=batch_docs,
                 task_goal=task_goal,
                 search_condition=search_condition,
-                batch_info=f"(批次 {i+1}/{total_batches})" if total_batches > 1 else ""
+                batch_info=f"""(batch {i+1}/{total_batches})""" if total_batches > 1 else ""
             )
 
             llm_response = self._call_llm_api(
                 prompt=prompt,
                 print_thinking=self.print_thinking,
-                task_name=f"批次{i+1}/{total_batches}"
+                task_name=f"""batch {i+1}/{total_batches}"""
             )
 
             if llm_response:
@@ -1480,32 +1155,32 @@ class MedicalRetriever:
 
                 if selected_fields and selected_fields != 'nan':
                     all_selected_fields.extend(selected_fields)
-                    all_reasons.append(f"批次{i+1}: {reason}")
+                    all_reasons.append(f"""Batch {i+1}: {reason}""")
             else:
-                logger.warning(f"批次 {i+1} 处理失败")
+                logger.warning(f"""Batch {i+1} failed""")
 
-        # 合并结果
+        # Merge results.
         if not all_selected_fields:
-            # 只有当确实进行过尝试（all_reasons不为空），才视为“结果为空”
-            # 如果是因为API全挂了导致的空，应该在外部捕获为False
+            # Treat the result as empty only if at least one API attempt succeeded.
+            # Complete API failure should be returned as success=False.
             if all_reasons:
                 return RetrievalResult(
-                    success=True,  # API调用成功了
+                    success=True,  # The API call succeeded.
                     data=[],
-                    field_empty=True,  # 但LLM没找到数据
-                    error_message="所有批次均未找到相关字段",
+                    field_empty=True,  # The LLM found no matching data.
+                    error_message="No relevant fields found in any batch",
                     field_extraction_reason="; ".join(all_reasons)
                 )
             else:
                 return RetrievalResult(
-                    success=False,  # 可能是API全挂了
-                    error_message="API调用失败或无响应"
+                    success=False,  # All API calls may have failed.
+                    error_message="API call failed or returned no response"
                 )
 
-        # 去重
+        # Remove duplicates.
         unique_fields = self._deduplicate_fields(all_selected_fields)
 
-        # 从原始数据中提取对应字段的值
+        # Extract selected field values from the original records.
         result_data = self._extract_fields_from_content(
             all_content=all_content,
             selected_fields=unique_fields
@@ -1514,7 +1189,7 @@ class MedicalRetriever:
         combined_reason = "; ".join(all_reasons) if len(all_reasons) > 1 else (all_reasons[0] if all_reasons else "")
 
         if self.print_thinking:
-            print(f"\n✅ 所有批次处理完成，总计选择字段: {len(unique_fields)}个，成功提取: {len(result_data)}条记录")
+            print(f"""\nAll batches complete: {len(unique_fields)} fields selected, {len(result_data)} records extracted""")
 
         return RetrievalResult(
             success=True,
@@ -1526,9 +1201,7 @@ class MedicalRetriever:
         self,
         fields: List[Union[str, Dict[str, str]]]
     ) -> List[Dict[str, str]]:
-        """
-        去重字段列表
-        """
+        "Remove duplicate field selections."
         seen = set()
         unique = []
 
@@ -1552,41 +1225,41 @@ class MedicalRetriever:
         llm_response: Dict[str, Any],
         all_content: Dict[str, Any]
     ) -> RetrievalResult:
-        """解析LLM提取响应"""
+        "Parse the LLM field-selection response."
         try:
             selected_fields = llm_response.get('selected_fields', [])
             thinking = llm_response.get('reason', '')
 
-            # 情况1：LLM明确返回空列表或'nan' -> 成功但为空
+            # Case 1: An empty list or 'nan' means successful retrieval with no fields.
             if not selected_fields or selected_fields == 'nan':
                 return RetrievalResult(
                     success=True,
                     data=[],
-                    field_empty=True,  # <--- 标记
-                    error_message="LLM未找到相关字段",
+                    field_empty=True,  # Mark the result as empty.
+                    error_message="LLM found no relevant fields",
                     field_extraction_reason=thinking
                 )
 
-            # 情况2：LLM返回了字段，去原始内容提取
+            # Case 2: Resolve the selected fields against the original records.
             result_data = self._extract_fields_from_content(
                 all_content=all_content,
                 selected_fields=selected_fields
             )
 
-            # 情况3：LLM产生了幻觉，返回了不存在的字段 -> 提取结果为空 ->
+            # Case 3: Nonexistent field names yield an empty extraction result.
             if len(result_data) == 0:
                 return RetrievalResult(
                     success=False,
                     data=[],
-                    field_empty=True,  # <--- 动态判断
-                    error_message="LLM返回了字段但在文档中未找到对应值",
+                    field_empty=True,  # Determine emptiness from the extracted data.
+                    error_message="LLM returned field names, but no corresponding values were found in the documents",
                     field_extraction_reason=thinking
                 )
             else:
                 return RetrievalResult(
                     success=True,
                     data=result_data,
-                    field_empty=False,  # <--- 动态判断
+                    field_empty=False,  # Determine emptiness from the extracted data.
                     error_message="",
                     field_extraction_reason=thinking
                 )
@@ -1595,19 +1268,14 @@ class MedicalRetriever:
             return RetrievalResult(
                 success=False,
                 field_empty=True,
-                error_message=f"解析LLM响应异常: {str(e)}"
+                error_message=f"""Exception parsing LLM response: {str(e)}"""
             )
 
     def _build_optimized_doc_summary(
         self,
         all_content: Dict[str, Any]
     ) -> Tuple[List[Dict[str, Any]], int]:
-        """
-        构建优化的文档摘要，包含字段列表和简短值预览
-
-        Returns:
-            (文档摘要列表, 估算的总token数)
-        """
+        "Build document summaries with field names and short value previews. Return (summaries, estimated_total_tokens)."
         doc_summaries = []
         total_text = ""
 
@@ -1621,7 +1289,7 @@ class MedicalRetriever:
 
             if isinstance(structured_data, dict):
                 for field_name, value in structured_data.items():
-                    # 截断过长的值
+                    # Truncate long values.
                     value_str = str(value)
                     if len(value_str) > self.MAX_FIELD_VALUE_LENGTH:
                         value_preview = value_str[:self.MAX_FIELD_VALUE_LENGTH] + "..."
@@ -1634,15 +1302,15 @@ class MedicalRetriever:
                     })
 
             elif isinstance(structured_data, list):
-                # 对于表格数据，提取字段名和样例
+                # For tabular data, collect column names and example values.
                 if structured_data and isinstance(structured_data[0], dict):
                     fields = list(structured_data[0].keys())
-                    doc_summary["fields"] = [{"field_name": f, "value_preview": "[表格数据]"} for f in fields]
+                    doc_summary["fields"] = [{"field_name": f, "value_preview": "[Tabular data]"} for f in fields]
                     doc_summary["record_count"] = len(structured_data)
 
             doc_summaries.append(doc_summary)
 
-            # 累计文本用于token估算
+            # Accumulate text for token estimation.
             total_text += doc_name + " " + json.dumps(doc_summary, ensure_ascii=False)
 
         total_tokens = self._estimate_tokens(total_text)
@@ -1656,25 +1324,17 @@ class MedicalRetriever:
         search_condition: Optional[str] = None,
         batch_info: str = ""
     ) -> str:
-        """
-        构建批量字段提取的提示词
-
-        Args:
-            doc_summaries: 文档摘要列表
-            task_goal: 任务目标
-            search_condition: 搜索条件
-            batch_info: 批次信息（用于多批处理时显示）
-        """
-        condition_text = f"\n附加筛选条件: {search_condition}" if search_condition else ""
+        "Build a field-selection prompt from doc_summaries, task_goal and optional search_condition. batch_info labels a batch for progress reporting."
+        condition_text = f"""\nAdditional selection condition: {search_condition}""" if search_condition else ""
         batch_text = f" {batch_info}" if batch_info else ""
 
-        # 格式化文档摘要
+        # Format document summaries.
         doc_text_parts = []
         for doc in doc_summaries:
-            doc_text = f"\n【文档: {doc['document_name']}】"
+            doc_text = f"""\n[Document: {doc['document_name']}]"""
             if "record_count" in doc:
-                doc_text += f" (共{doc['record_count']}条记录)"
-            doc_text += "\n字段列表:"
+                doc_text += f""" ({doc['record_count']} records)"""
+            doc_text += "\nFields:"
 
             for field in doc.get("fields", []):
                 field_name = field["field_name"]
@@ -1688,37 +1348,7 @@ class MedicalRetriever:
 
         all_docs_text = "\n".join(doc_text_parts)
 
-        prompt = f"""你是一位资深的运动医学专家。
-
-请根据给定的条件文档和任务目标，从以下文档中选择任务高度相关的字段。\n
-在关于{condition_text}的文档下，执行任务目标: {task_goal} 。\n
-
-===== 文档内容 =====
-\n
-{all_docs_text} 
-\n
-===== 任务要求 =====
-1. 分析任务目标，确定需要哪些数据\n
-2. 从所有文档中识别与任务目标相关的字段\n
-3. 字段名必须与文档中的原始字段名完全一致\n
-4. 如果同一指标在多个文档中出现，都应该选择\n
-
-请以JSON格式返回结果:\n
-{{
-    "reason": "选择这些字段的理由（简要说明）",
-    "selected_fields": [
-        {{"document": "文档名1", "field": "字段名1"}},
-        {{"document": "文档名1", "field": "字段名2"}},
-        {{"document": "文档名2", "field": "字段名3"}}
-    ]
-}}\n
-
-如果没有找到符合条件的字段，请返回:\n
-{{
-    "reason": "说明为什么没有找到相关字段",
-    "selected_fields": []
-}}
-"""
+        prompt = render_prompt("field_selection", **{"record-level search condition or specified target records": search_condition or ", ".join(doc["document_name"] for doc in doc_summaries), "field-level task goal": task_goal, "field-level summaries from candidate records": all_docs_text})
         return prompt
 
     def _extract_fields_from_content(
@@ -1726,15 +1356,10 @@ class MedicalRetriever:
         all_content: Dict[str, Any],
         selected_fields: List[Union[str, Dict[str, str]]]
     ) -> List[Dict[str, Any]]:
-        """
-        从原始内容中提取选中字段的值，返回records格式
-
-        对于表格数据：保留记录结构，筛选指定字段
-        对于键值对数据：返回 [{'field': 字段名, 'value': 值}, ...]
-        """
-        # 按文档分组需要提取的字段
+        "Extract selected values from the original records. Preserve row structure for tables; return field/value records for key-value data."
+        # Group requested fields by document.
         doc_fields_map = {}  # {doc_name: [field1, field2, ...]}
-        global_fields = []   # 未指定文档的字段
+        global_fields = []   # Fields without a specified document
 
         for field_spec in selected_fields:
             if isinstance(field_spec, dict):
@@ -1758,7 +1383,7 @@ class MedicalRetriever:
         for content_doc_name, content in all_content.items():
             structured_data = content.get('structured_data', {})
 
-            # 确定该文档需要提取的字段
+            # Determine which fields to extract from this document.
             fields_to_extract = []
             if content_doc_name in doc_fields_map:
                 fields_to_extract.extend(doc_fields_map[content_doc_name])
@@ -1768,9 +1393,9 @@ class MedicalRetriever:
                 continue
 
             if isinstance(structured_data, dict):
-                # 键值对数据
+                # Key-value data
                 for field_name in fields_to_extract:
-                    # 精确匹配
+                    # Exact matching
                     if field_name in structured_data:
                         result.append({
                             'document': content_doc_name,
@@ -1780,14 +1405,14 @@ class MedicalRetriever:
 
 
             elif isinstance(structured_data, list):
-                # 表格数据：保留记录结构，筛选指定字段
+                # Tabular data: retain record structure and select requested fields.
                 for record in structured_data:
                     if isinstance(record, dict):
-                        filtered_record = {'文档名': content_doc_name}
+                        filtered_record = {"document_name": content_doc_name}
                         has_field = False
 
                         for field_name in fields_to_extract:
-                            # 精确匹配
+                            # Exact matching
                             if field_name in record:
                                 filtered_record[field_name] = record[field_name]
                                 has_field = True
@@ -1802,38 +1427,34 @@ class MedicalRetriever:
             result: RetrievalResult,
             all_content: Dict[str, Any]
     ) -> RetrievalResult:
-        """
-        验证LLM检索结果：
-        1. 仅验证数据来源的文档是否存在。
-        2. 只要字段在文档中存在（无论值是否为空/NaN），都予以保留。
-        """
+        "Validate the source documents of retrieval results. Retain fields present in the source even if their values are empty or NaN."
 
-        # 如果结果本来就是空的，直接返回成功（由上层逻辑决定空是否合理）
+        # Return a successful empty result; callers decide whether emptiness is acceptable.
         if not result.data:
             return RetrievalResult(
                 success=True,
                 data=[],
                 field_extraction_reason=result.field_extraction_reason,
-                error_message="检索结果为空"
+                error_message="Retrieval result is empty"
             )
 
         valid_data = []
 
         for record in result.data:
-            # 1. 识别文档来源
-            # 兼容两种格式：{'_document': 'Name', ...} 或 {'document': 'Name', 'field': ...}
-            doc_name = record.get('文档名') or record.get('document')
+            # 1. Identify the source document.
+            # Support both {'_document': 'Name', ...} and {'document': 'Name', 'field': ...}.
+            doc_name = record.get("document_name") or record.get('document')
 
-            # 2. 核心验证：只判断文档来源是否真实存在
-            # 字段名的存在性已在 _extract_fields_from_content 中通过 if field in structured_data 保证
+            # 2. Verify that the source document exists.
+            # Field existence is checked against structured_data in _extract_fields_from_content.
             if doc_name and doc_name in all_content:
                 valid_data.append(record)
             else:
-                # 只有当文档名是幻觉（不存在于all_content）时才丢弃
-                logger.warning(f"丢弃无效数据: 文档 '{doc_name}' 不在原始内容列表中")
+                # Discard a record only when its source document is absent from all_content.
+                logger.warning(f"""Discarding invalid data: document '{doc_name}' is absent from the original content""")
 
-        # 3. 构造返回结果
-        # 即使 valid_data 为空（例如文档名全是错的），也视为 Success=True (只要流程没崩)
+        # 3. Construct the return value.
+        # An empty valid_data list still represents a completed retrieval operation.
         if len(valid_data) == 0:
             return RetrievalResult(
                 success=True,
@@ -1850,7 +1471,7 @@ class MedicalRetriever:
                 field_extraction_reason=result.field_extraction_reason,
                 error_message="")
 
-    # ==================== 便捷检索方法 ====================
+    # Convenience retrieval methods
 
     def retrieve_by_condition(
         self,
@@ -1860,7 +1481,7 @@ class MedicalRetriever:
         task_goal: str,
         max_retries: int = 3
     ) -> RetrievalResult:
-        """根据搜索条件检索（便捷方法）"""
+        "Retrieve using a search condition."
         return self.retrieve_by_llm(
             center=center,
             patient=patient,
@@ -1877,7 +1498,7 @@ class MedicalRetriever:
         task_goal: str,
         max_retries: int = 3
     ) -> RetrievalResult:
-        """根据指定文档检索（便捷方法）"""
+        "Retrieve from specified documents."
         return self.retrieve_by_llm(
             center=center,
             patient=patient,
@@ -1886,20 +1507,20 @@ class MedicalRetriever:
             max_retries=max_retries
         )
 
-    # ==================== LLM API 调用方法 ====================
+    # LLM API methods
 
     def _call_llm_api(
         self,
         prompt: str,
         temperature: float = 0.2,
         print_thinking: bool = True,
-        task_name: str = "LLM检索",
+        task_name: str = "LLM retrieval",
         model: str = 'qwen3-max'
     ) -> Optional[Dict[str, Any]]:
-        """调用LLM API"""
+        "Call the LLM API."
 
         if llm_api_config is None or deepseek_stream_calling is None:
-            logger.warning("LLM配置未加载")
+            logger.warning("LLM configuration is unavailable")
             return None
 
         api_key_list = [llm_api_config.QWEN_KEY_API]
@@ -1907,47 +1528,52 @@ class MedicalRetriever:
         for api_key in api_key_list:
             try:
                 if print_thinking:
-                    print(f"🤖 [{task_name}] 大模型思考中...")
+                    print(f"""[{task_name}] Model reasoning in progress""")
 
                 result = qwen_stream_completion(model=model, api_key=api_key, content=prompt, temperature=temperature)
 
                 if result:
-                    parsed_result = result #self._parse_api_response(result)
+                    parsed_result = result  # Normalize the appendix schema for internal callers.
+                    if "selected_records" in parsed_result:
+                        parsed_result["selected_documents"] = parsed_result.pop("selected_records")
+                    for field in parsed_result.get("selected_fields", []):
+                        if isinstance(field, dict) and "record" in field:
+                            field["document"] = field.pop("record")
                     if parsed_result:
                         if print_thinking:
                             print(f"\n{'='*50}")
-                            print(f"✅ [{task_name}] 思考完成")
+                            print(f"""[{task_name}] Reasoning complete""")
                             if 'reason' in parsed_result:
-                                print(f"\n📝 理由: {parsed_result['reason']}")
+                                print(f"""\nRationale: {parsed_result['reason']}""")
                             if 'selected_documents' in parsed_result:
                                 docs = parsed_result['selected_documents']
                                 if docs:
-                                    print(f"📁 选择文档: {docs}")
+                                    print(f"""Selected documents: {docs}""")
                             if 'selected_fields' in parsed_result:
                                 fields = parsed_result['selected_fields']
                                 if fields:
-                                    print(f"📋 选择字段: {len(fields)}个")
-                                    for f in fields:  # 只显示前5个
+                                    print(f"""Selected fields: {len(fields)}""")
+                                    for f in fields:  # Display selected fields.
                                         if isinstance(f, dict):
                                             print(f"   - {f.get('document', '')}: {f.get('field', '')}")
                             print(f"{'='*50}\n")
                         return parsed_result
                     else:
-                        logger.info('返回内容解析失败，尝试换用API KEY')
+                        logger.info("Response parsing failed; trying another API key")
                         continue
                 else:
-                    logger.info('调用失败，尝试换用API KEY')
+                    logger.info("Call failed; trying another API key")
                     continue
 
             except Exception as e:
-                logger.error(f'API调用异常: {str(e)}')
+                logger.error(f"""API call exception: {str(e)}""")
                 continue
 
-        logger.error('所有API KEY均调用失败')
+        logger.error("All API keys failed")
         return None
 
     def _parse_api_response(self, response_text: str) -> Optional[Dict[str, Any]]:
-        """解析API响应"""
+        "Parse an API response."
         cleaned_text = response_text.strip()
 
         try:
@@ -1962,7 +1588,7 @@ class MedicalRetriever:
                     return None
             return None
 
-    # ==================== 批量检索方法 ====================
+    # Batch retrieval methods
 
     def batch_retrieve_by_field(
         self,
@@ -1971,10 +1597,10 @@ class MedicalRetriever:
         document_name: str,
         field_names: Union[str, List[str]]
     ) -> Dict[str, RetrievalResult]:
-        """批量检索多个患者的指定字段"""
+        "Retrieve specified fields for multiple patients."
         results = {}
         for patient in patients:
-            logger.info(f"正在检索患者 {patient} 的数据...")
+            logger.info(f"""Retrieving data for patient {patient}""")
             results[patient] = self.retrieve_by_field(
                 center=center,
                 patient=patient,
@@ -1990,10 +1616,10 @@ class MedicalRetriever:
         search_condition: str,
         task_goal: str
     ) -> Dict[str, RetrievalResult]:
-        """批量根据条件检索多个患者的相关数据"""
+        "Retrieve condition-matched data for multiple patients."
         results = {}
         for patient in patients:
-            logger.info(f"正在智能检索患者 {patient} 的数据...")
+            logger.info(f"""Running semantic retrieval for patient {patient}""")
             results[patient] = self.retrieve_by_condition(
                 center=center,
                 patient=patient,
@@ -2009,10 +1635,10 @@ class MedicalRetriever:
         document_names: Union[str, List[str]],
         task_goal: str
     ) -> Dict[str, RetrievalResult]:
-        """批量根据指定文档检索多个患者的相关数据"""
+        "Retrieve specified documents for multiple patients."
         results = {}
         for patient in patients:
-            logger.info(f"正在检索患者 {patient} 的指定文档...")
+            logger.info(f"""Retrieving selected documents for patient {patient}""")
             results[patient] = self.retrieve_by_documents(
                 center=center,
                 patient=patient,
@@ -2022,92 +1648,92 @@ class MedicalRetriever:
         return results
 
 
-# ==================== 使用示例 ====================
+# Usage examples
 
 def example_usage():
-    """使用示例"""
+    "Demonstrate retrieval with synthetic patient identifiers."
 
-    # 初始化检索器（可配置最大token限制和默认扩展名）
+    # Initialize the retriever with configurable token limit and default extension.
     retriever = MedicalRetriever(
         data_dir="../data/raw_processed",
         output_dir="../data/interim",
         print_thinking=True,
         max_input_tokens=8096,
-        default_extension=".csv"  # 默认扩展名
+        default_extension=".csv"  # Default extension
     )
 
-    # # 示例1: 精确检索（文档名可以不带扩展名，默认添加.csv）
+    # Example 1: Exact retrieval; .csv is added when the extension is absent.
     print("\n" + "="*60)
-    print("示例1: 精确检索（默认.csv扩展名）")
+    print("Example 1: Exact retrieval (default .csv extension)")
     print("="*60)
     result = retriever.retrieve_by_field(
-        center="中山二院",
-        patient="严振刚",
-        document_name="入院记录",  # 自动补全为 入院记录.csv
-        field_names=["性别", "年龄", "科室"]
+        center="Center-A",
+        patient="Patient-001",
+        document_name="Admission note",  # Automatically completed to Admission note.csv.
+        field_names=["Sex", "Age", "Department"]
     )
-    print(f"检索成功: {result.success}")
-    print(f"来源文档: {result.source_documents}")
-    print(f"检索数据 (records格式):")
+    print(f"""Retrieval succeeded: {result.success}""")
+    print(f"""Source documents: {result.source_documents}""")
+    print(f"""Retrieved data (records format):""")
     for record in result.data:
         print(f"  {record}")
 
-    # 示例2: 按搜索条件检索（自动分批）
+    # Example 2: Retrieve by search condition with automatic batching.
     # print("\n" + "="*60)
-    # print("示例2: 按搜索条件检索（自动分批）")
+    # print("Example 2: Search-condition retrieval with automatic batching")
     # print("="*60)
     # result = retriever.retrieve_by_condition(
-    #     center="中山二院",
-    #     patient="严振刚",
-    #     search_condition="术前",
-    #     task_goal="现在要预测患者术后ACL-RSI的评分,请帮我找出与之相关的字段，辅助进行预测"
+    #     center="Center-A",
+    #     patient="Patient-001",
+    #     search_condition="Preoperative records",
+    #     task_goal=retrieval_goal(6)
     # )
-    # print(f"检索成功: {result.success}")
-    # print(f"来源文档: {result.source_documents}")
-    # print(f"文档选择理由: {result.document_selection_reason}")
-    # print(f"字段提取理由: {result.field_extraction_reason}")
-    # print(f"检索记录数: {len(result.data)}")
+    # print(f"Retrieval succeeded: {result.success}")
+    # print(f"Source documents: {result.source_documents}")
+    # print(f"Document selection rationale: {result.document_selection_reason}")
+    # print(f"Field selection rationale: {result.field_extraction_reason}")
+    # print(f"Retrieved records: {len(result.data)}")
 
-    # 示例3: 按指定多个文档检索（文档名可以不带扩展名）
+    # Example 3: Retrieve several specified documents, with optional extensions.
     print("\n" + "="*60)
-    print("示例3: 按指定文档检索（文档名自动补全扩展名）")
+    print("Example 3: Retrieve selected documents (extensions completed automatically)")
     print("="*60)
     result = retriever.retrieve_by_documents(
-        center="中心A",
-        patient="张三",
+        center="Center-A",
+        patient="Patient-001",
         document_names=[
-            "入院记录",      # 自动补全为 入院记录.csv
-            "血常规报告",    # 自动补全为 血常规报告.csv
-            "生化检查",      # 自动补全为 生化检查.csv
-            "凝血功能",
-            "心电图报告",
-            "超声心动图"
+            "Admission note",      # Automatically completed to Admission note.csv.
+            "Complete blood count report",    # Automatically completed to Complete blood count report.csv.
+            "Biochemistry tests",      # Automatically completed to Biochemistry tests.csv.
+            "Coagulation function",
+            "Electrocardiogram report",
+            "Echocardiogram"
         ],
-        task_goal="提取患者的感染指标、心功能和凝血相关数据"
+        task_goal="Retrieve infection markers, cardiac function and coagulation data"
     )
-    # print(f"检索成功: {result.success}")
-    # print(f"来源文档: {result.source_documents}")
-    # print(f"检索记录数: {len(result.data)}")
+    # print(f"Retrieval succeeded: {result.success}")
+    # print(f"Source documents: {result.source_documents}")
+    # print(f"Retrieved records: {len(result.data)}")
     #
-    # # 展示data可以直接转为DataFrame
+    # Convert retrieved records directly to a DataFrame.
     # if result.data:
-    #     print("\n转为DataFrame:")
+    #     print("\nDataFrame:")
     #     df = pd.DataFrame(result.data)
     #     print(df.head())
     #
-    # # 示例4: 批量检索
+    # Example 4: Batch retrieval
     # print("\n" + "="*60)
-    # print("示例4: 批量检索多患者")
+    # print("Example 4: Retrieve multiple patients")
     # print("="*60)
-    # patients = ["张三", "李四", "王五"]
+    # patients = ["Patient-001", "Patient-002", "Patient-003"]
     # results = retriever.batch_retrieve_by_condition(
-    #     center="中心A",
+    #     center="Center-A",
     #     patients=patients,
-    #     search_condition="术前",
-    #     task_goal="提取术前血常规和凝血功能指标"
+    #     search_condition="Preoperative records",
+    #     task_goal="Retrieve preoperative complete blood count and coagulation indicators"
     # )
     # for patient, result in results.items():
-    #     print(f"{patient}: 文档={result.source_documents}, 记录数={len(result.data)}, 成功={result.success}")
+    #     print(f"{patient}: documents={result.source_documents}, records={len(result.data)}, success={result.success}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,11 @@
+numpy
+pandas
+openai
+anthropic
+requests
+tiktoken
+PyMuPDF
+pytz
+PyYAML
+openpyxl
+xlrd

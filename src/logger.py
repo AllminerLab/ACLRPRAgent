@@ -9,11 +9,7 @@ import pytz
 
 
 def init_logger(log_file_save_path: str = '../../log/morning') -> logging.Logger:
-    """
-    初始化日志对象
-    :param log_file_save_path: 日志文件保存路径
-    :return: 日志对象
-    """
+    "Initialize and return a logger that writes to log_file_save_path."
     timezone = pytz.timezone('Asia/Shanghai')
     log_time = datetime.now(timezone).strftime('%Y-%m-%d')
     log_file_save_path = os.path.join(log_file_save_path, log_time + '.log')
@@ -38,7 +34,7 @@ def init_logger(log_file_save_path: str = '../../log/morning') -> logging.Logger
     return logger
 
 def find_file_handler(logger: logging.Logger, file_path: str) -> Optional[logging.FileHandler]:
-    """查找指定文件路径的FileHandler"""
+    "Find the FileHandler associated with a file path."
     abs_path = os.path.abspath(file_path)
 
     for handler in logger.handlers:

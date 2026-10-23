@@ -26,7 +26,7 @@ def create_inference_yaml_config(dataset_dir='./data/dataset',
                                  per_device_eval_batch_size=16,
                                  temperature=0.2):
     pass
-    # 定义配置数据
+    # Define configuration data.
     config = {
         'model_name_or_path': model_name_or_path,
         'trust_remote_code': True,
@@ -53,12 +53,12 @@ def create_inference_yaml_config(dataset_dir='./data/dataset',
 
     }
 
-    # 确保/data/目录存在
+    # Ensure the data directory exists.
     os.makedirs('./data', exist_ok=True)
 
     try:
         with open(yaml_file_path, 'w', encoding='utf-8') as f:
-            # 添加注释分组
+            # Add section comments.
             f.write("### model\n")
             if config['adapter_name_or_path'] is not None:
                 yaml.dump({
@@ -106,11 +106,11 @@ def create_inference_yaml_config(dataset_dir='./data/dataset',
                 'predict_with_generate': config['predict_with_generate']
             }, f, default_flow_style=False, allow_unicode=True)
 
-        logger.info(f"✅ 成功创建配置文件: {yaml_file_path}")
+        logger.info(f"""Configuration file created: {yaml_file_path}""")
         return yaml_file_path
 
     except Exception as e:
-        logger.info(f"❌ 创建配置文件时出错: {e}")
+        logger.info(f"""Error creating configuration file: {e}""")
         return None
 
 
@@ -122,16 +122,8 @@ def create_train_yaml_config(dataset_dir='../data/dataset',  # '/mnt/d/project-h
                              yaml_file_path='./data/train_lora/train.yaml',
                              train_max_samples=500000,
                              num_train_epochs=3):
-    """
-    dataset_dir: 存放dataset_info.json文件和数据集的地方
-    dataset：dataset_info.json中数据集的key
-    output_dir: 存放微调的参数的地方
-    model_name_or_path: 存放原始大模型的地方
-    yaml_file_path: 存放yaml文件的路径
-    : return
-    返回 test.yaml配置文件
-    """
-    # 定义配置数据
+    "Create and return a YAML configuration. dataset_dir contains dataset_info.json and datasets; dataset is a key in that file; output_dir stores fine-tuned parameters; model_name_or_path locates the base model; yaml_file_path is the destination configuration path."
+    # Define configuration data.
     config = {
         # model
         'model_name_or_path': model_name_or_path,
@@ -144,7 +136,7 @@ def create_train_yaml_config(dataset_dir='../data/dataset',  # '/mnt/d/project-h
         'lora_rank': 8,
         'lora_target': 'all',
 
-        # dataset (根据要求修改)
+        # Dataset settings (adjust as needed)
         'dataset_dir': dataset_dir,
         'dataset': dataset,
         'template': 'qwen',
@@ -154,7 +146,7 @@ def create_train_yaml_config(dataset_dir='../data/dataset',  # '/mnt/d/project-h
         'preprocessing_num_workers': 16,
         'dataloader_num_workers': 4,
 
-        # output (根据要求修改)
+        # Output settings (adjust as needed)
         'output_dir': output_dir,
         'logging_steps': 10,
         'save_steps': 500,
@@ -174,7 +166,7 @@ def create_train_yaml_config(dataset_dir='../data/dataset',  # '/mnt/d/project-h
         'ddp_timeout': 180000000,
         'resume_from_checkpoint': None,
 
-        # eval (注释掉的部分，这里用None表示或者不包含)
+        # Evaluation settings (optional; omitted or set to None)
         # 'eval_dataset': dataset,
         # 'val_size': 0.1,
         # 'per_device_eval_batch_size': 1,
@@ -182,12 +174,12 @@ def create_train_yaml_config(dataset_dir='../data/dataset',  # '/mnt/d/project-h
         # 'eval_steps': 500
     }
 
-    # 确保/data/目录存在
+    # Ensure the data directory exists.
     os.makedirs('./data', exist_ok=True)
 
     try:
         with open(yaml_file_path, 'w', encoding='utf-8') as f:
-            # 添加注释分组
+            # Add section comments.
             f.write("### model\n")
             yaml.dump({
                 'model_name_or_path': config['model_name_or_path'],
@@ -248,65 +240,61 @@ def create_train_yaml_config(dataset_dir='../data/dataset',  # '/mnt/d/project-h
             f.write("# eval_strategy: steps\n")
             f.write("# eval_steps: 500\n")
 
-        logger.info(f"✅ 成功创建配置文件: {yaml_file_path}")
+        logger.info(f"""Configuration file created: {yaml_file_path}""")
         return yaml_file_path
 
     except Exception as e:
-        logger.info(f"❌ 创建配置文件时出错: {e}")
+        logger.info(f"""Error creating configuration file: {e}""")
         return None
 
 
 def run_llamafactory_train(config_path):
-    """
-    使用llamafactory-cli train运行训练
-    """
+    "Run training with llamafactory-cli train."
     try:
-        # 检查配置文件是否存在
+        # Check that the configuration file exists.
         if not os.path.exists(config_path):
-            logger.info(f"❌ 配置文件不存在: {config_path}")
+            logger.info(f"""Configuration file does not exist: {config_path}""")
             return False
 
-        # 构建命令
+        # Build the command.
         cmd = ['llamafactory-cli', 'train', config_path]
 
-        logger.info(f"🚀 开始执行训练命令: {' '.join(cmd)}")
+        logger.info(f"""Running training command: {' '.join(cmd)}""")
         logger.info("=" * 50)
 
-        # 执行命令
+        # Execute the command.
         result = subprocess.run(
             cmd,
-            capture_output=False,  # 让输出直接显示在终端
+            capture_output=False,  # Stream output directly to the terminal.
             text=True,
-            check=False  # 不自动抛出异常，手动检查返回码
+            check=False  # Inspect the return code without raising automatically.
         )
 
         if result.returncode == 0:
             logger.info("=" * 50)
-            logger.info("✅ 训练命令执行成功!")
+            logger.info("Training command completed successfully")
             return True
         else:
             logger.info("=" * 50)
-            logger.info(f"❌ 训练命令执行失败，返回码: {result.returncode}")
+            logger.info(f"""Training command failed with return code: {result.returncode}""")
             return False
 
     except FileNotFoundError:
-        logger.info("❌ 找不到 llamafactory-cli 命令，请确保已正确安装 LLaMA-Factory")
-        logger.info("   可以尝试: pip install llamafactory")
+        logger.info("llamafactory-cli was not found. Check that LLaMA-Factory is installed.")
+        logger.info("   Try: pip install llamafactory")
         return False
     except Exception as e:
-        logger.info(f"❌ 执行训练时出错: {e}")
+        logger.info(f"""Training error: {e}""")
         return False
 
 
 def llm_train(dataset, output_dir, yaml_file_path, dataset_dir, model_name_or_path, train_max_samples=500000, num_train_epochs=3):
-    """
-    主函数
-    """
-    logger.info("🔧 LLaMA Factory 配置文件生成和训练脚本")
+    "Run the configuration and execution workflow."
+    logger.info("LLaMA-Factory configuration and training script")
     logger.info("=" * 50)
 
-    # 1. 创建YAML配置文件
-    logger.info("📝 步骤1: 创建训练yaml配置文件...")
+    # 1. Create the YAML configuration.
+    logger.info("Step 1: Create the training YAML configuration")
     config_path = create_train_yaml_config(dataset_dir=dataset_dir,
                                            dataset=dataset,
                                            output_dir=output_dir,
@@ -316,83 +304,79 @@ def llm_train(dataset, output_dir, yaml_file_path, dataset_dir, model_name_or_pa
                                            num_train_epochs=num_train_epochs)  # create_train_yaml_config()
 
     if config_path is None:
-        logger.info("❌ 配置文件创建失败，程序退出")
+        logger.info("Configuration creation failed; exiting")
         sys.exit(1)
 
-    # 显示创建的配置文件内容
-    logger.info("\n📋 生成的配置文件内容:")
+    # Display the generated configuration.
+    logger.info("\nGenerated configuration:")
     logger.info("-" * 30)
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             logger.info(f.read())
     except Exception as e:
-        logger.info(f"无法读取配置文件: {e}")
+        logger.info(f"""Unable to read configuration file: {e}""")
 
     logger.info("-" * 30)
 
-    # 2. 执行训练
-    logger.info("\n🚀 步骤2: 执行训练...")
+    # 2. Run training.
+    logger.info("\nStep 2: Run training")
     success = run_llamafactory_train(config_path)
 
     if success:
-        logger.info("\n🎉 所有步骤完成!")
+        logger.info("\nAll steps completed")
     else:
-        logger.info("\n⚠️  配置文件已创建，但训练执行失败")
-        logger.info(f"   您可以手动执行: llamafactory-cli train {config_path}")
+        logger.info("\nConfiguration created, but training failed")
+        logger.info(f"""   Run manually: llamafactory-cli train {config_path}""")
 
 
 def run_llamafactory_predict(config_path):
-    """
-    使用llamafactory-cli train运行训练
-    """
+    "Run training with llamafactory-cli train."
     try:
-        # 检查配置文件是否存在
+        # Check that the configuration file exists.
         if not os.path.exists(config_path):
-            logger.info(f"❌ 配置文件不存在: {config_path}")
+            logger.info(f"""Configuration file does not exist: {config_path}""")
             return False
 
-        # 构建命令
+        # Build the command.
         cmd = ['llamafactory-cli', 'train', config_path]
 
-        logger.info(f"🚀 开始执行推理命令: {' '.join(cmd)}")
+        logger.info(f"""Running inference command: {' '.join(cmd)}""")
         logger.info("=" * 50)
 
-        # 执行命令
+        # Execute the command.
         result = subprocess.run(
             cmd,
-            capture_output=False,  # 让输出直接显示在终端
+            capture_output=False,  # Stream output directly to the terminal.
             text=True,
-            check=False  # 不自动抛出异常，手动检查返回码
+            check=False  # Inspect the return code without raising automatically.
         )
 
         if result.returncode == 0:
             logger.info("=" * 50)
-            logger.info("✅ 推理命令执行成功!")
+            logger.info("Inference command completed successfully")
             return True
         else:
             logger.info("=" * 50)
-            logger.info(f"❌ 推理命令执行失败，返回码: {result.returncode}")
+            logger.info(f"""Inference command failed with return code: {result.returncode}""")
             return False
 
     except FileNotFoundError:
-        logger.info("❌ 找不到 llamafactory-cli 命令，请确保已正确安装 LLaMA-Factory")
-        logger.info("   可以尝试: pip install llamafactory")
+        logger.info("llamafactory-cli was not found. Check that LLaMA-Factory is installed.")
+        logger.info("   Try: pip install llamafactory")
         return False
     except Exception as e:
-        logger.info(f"❌ 执行推理时出错: {e}")
+        logger.info(f"""Inference error: {e}""")
         return False
 
 
 def llm_predict(dataset_dir, eval_dataset, output_dir, yaml_file_path, model_name_or_path,
                 adapter_name_or_path=None, test_max_samples=100000, per_device_eval_batch_size=16, temperature=0.6):
-    """
-    主函数
-    """
-    logger.info("🔧 LLaMA Factory 配置文件生成和推理脚本")
+    "Run the configuration and execution workflow."
+    logger.info("LLaMA-Factory configuration and inference script")
     logger.info("=" * 50)
 
-    # 1. 创建YAML配置文件
-    logger.info("📝 步骤1: 创建推理yaml配置文件...")
+    # 1. Create the YAML configuration.
+    logger.info("Step 1: Create the inference YAML configuration")
     config_path = create_inference_yaml_config(dataset_dir=dataset_dir,
                                                eval_dataset=eval_dataset,
                                                output_dir=output_dir,
@@ -404,29 +388,29 @@ def llm_predict(dataset_dir, eval_dataset, output_dir, yaml_file_path, model_nam
                                                temperature=temperature)
 
     if config_path is None:
-        logger.info("❌ 配置文件创建失败，程序退出")
+        logger.info("Configuration creation failed; exiting")
         sys.exit(1)
 
-    # 显示创建的配置文件内容
-    logger.info("\n📋 生成的配置文件内容:")
+    # Display the generated configuration.
+    logger.info("\nGenerated configuration:")
     logger.info("-" * 30)
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             logger.info(f.read())
     except Exception as e:
-        logger.info(f"无法读取配置文件: {e}")
+        logger.info(f"""Unable to read configuration file: {e}""")
 
     logger.info("-" * 30)
 
-    # 2. 执行推理
-    logger.info("\n🚀 步骤2: 执行推理...")
+    # 2. Run inference.
+    logger.info("\nStep 2: Run inference")
     success = run_llamafactory_predict(config_path)
 
     if success:
-        logger.info("\n🎉 所有步骤完成!")
+        logger.info("\nAll steps completed")
     else:
-        logger.info("\n⚠️  配置文件已创建，但推理执行失败")
-        logger.info(f"   您可以手动执行: llamafactory-cli train {config_path}")
+        logger.info("\nConfiguration created, but inference failed")
+        logger.info(f"""   Run manually: llamafactory-cli train {config_path}""")
 
 
 if __name__ == "__main__":

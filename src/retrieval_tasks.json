@@ -1,0 +1,86 @@
+[
+  {
+    "tool": "Tegner prediction and attribution tool",
+    "action": "Perioperative registration record retrieval",
+    "records": "Perioperative clinical data of patients with ACL Injury",
+    "condition": "Not applicable; target records were specified",
+    "goal": "Retrieve fields related to postoperative Tegner score prediction after ACL injury. Because the Tegner score reflects physical activity level, retrieval focused on: (1) demographic characteristics, including age, sex, BMI, and occupation, with distinction among heavy manual work, light physical work, and sedentary work; (2) exercise habits before injury, including sport or exercise type, exercise frequency, and activity level, such as national-level, competitive, recreational, or sedentary status; and (3) injury and surgical information, including surgical date, meniscal treatment, and cartilage injury, which may affect long-term activity level."
+  },
+  {
+    "tool": "Tegner prediction and attribution tool",
+    "action": "Admission and operative record retrieval",
+    "records": "Admission note; operative report",
+    "condition": "Not applicable; target records were specified",
+    "goal": "Retrieve key baseline information relevant to postoperative physical activity level and Tegner score prediction, including: (1) descriptions of activity demand, such as injury scenarios described in the chief complaint or history of present illness, for example landing during basketball or cutting during football, which may indicate the patient's pre-injury activity context; (2) joint structural integrity, including whether the meniscus was resected or repaired, whether cartilage injury was present, and the ligament reconstruction approach; and (3) occupational physical demands, including whether the patient was an athlete, soldier, or heavy manual worker."
+  },
+  {
+    "tool": "Tegner prediction and attribution tool",
+    "action": "Preoperative status review",
+    "records": "Not specified",
+    "condition": "Preoperative clinical records, examination reports, and preoperative Tegner-related information",
+    "goal": "From the perspective of a sports medicine specialist and using the patient baseline profile as context, retrieve preoperative records and fields relevant to Tegner score prediction and attribution. Because the Tegner score depends not only on perioperative status but also on pre-injury physical activity level, retrieval focused on: (1) pre-injury physical activity level, including documented preoperative Tegner scores or specific descriptions of activity level; (2) preoperative functional status, including preoperative range of motion and joint instability severity, such as Lachman, anterior drawer, or pivot-shift testing when available; and (3) motivation to return to activity, including explicit intention to resume sports participation or higher-demand activity, which may be associated with higher postoperative Tegner scores."
+  },
+  {
+    "tool": "Tegner prediction and attribution tool",
+    "action": "Postoperative status review",
+    "records": "Not specified",
+    "condition": "Postoperative records, follow-up or reassessment records, clinical notes, and discharge-related records",
+    "goal": "From the perspective of a sports medicine specialist and using the patient baseline profile as context, retrieve postoperative records and fields relevant to Tegner score prediction and attribution. Because the Tegner score reflects achieved physical activity level rather than psychological readiness, retrieval focused on: (1) current activity or sport type, including whether the patient had resumed running, ball sports, and whether activity was competitive or recreational; (2) recovery of work capacity, especially return to heavy manual work; (3) knee performance during higher-intensity activities such as sudden stopping, cutting, or jumping, including swelling, pain, or instability; and (4) objective physical examination findings, including Lachman and pivot-shift test results, because laxity may directly affect return to higher-level activity."
+  },
+  {
+    "tool": "ACL-RSI prediction and attribution tool",
+    "action": "Perioperative registration record retrieval",
+    "records": "Perioperative clinical data of patients with ACL Injury",
+    "condition": "Not applicable; target records were specified",
+    "goal": "Retrieve fields related to postoperative ACL-RSI score prediction after ACL injury, with particular emphasis on key baseline information, including demographic characteristics such as age, sex, BMI, and occupation or athletic background; core surgical parameters such as surgical date as the key time anchor, graft type, and meniscal treatment; and injury mechanism, including injury timing and injury context such as contact or non-contact mechanism. These categories served as guidance, and retrieval was adapted to the available patient-specific records."
+  },
+  {
+    "tool": "ACL-RSI prediction and attribution tool",
+    "action": "Admission and operative record retrieval",
+    "records": "Admission note; operative report",
+    "condition": "Not applicable; target records were specified",
+    "goal": "Retrieve fields related to postoperative ACL-RSI score prediction after ACL injury, with emphasis on key baseline information, including: (1) core surgical parameters, such as surgical procedure, graft type, and meniscal management, including repair, resection, or meniscal shaping; (2) injury mechanism, including injury timing, specific injury context, contact or non-contact mechanism, and cause of injury; and (3) baseline information, including sex, age, chief complaint, history of present illness, past medical history, and personal history. These categories served as guidance, and retrieval was adapted to the available patient-specific records."
+  },
+  {
+    "tool": "ACL-RSI prediction and attribution tool",
+    "action": "Preoperative status review",
+    "records": "Not specified",
+    "condition": "Preoperative clinical records and examination reports related to functional limitation, perceived instability, and psychological readiness-related concerns",
+    "goal": "From the perspective of a sports medicine specialist and using the patient baseline profile as context, retrieve preoperative records and fields relevant to ACL-RSI score prediction and attribution. Retrieval considered preoperative functional status, including preoperative range of motion, KT-1000 or KT-2000 side-to-side difference when available, and muscle atrophy; preoperative patient-reported scores, including IKDC and Lysholm scores when available; and psychological readiness-related traces, including descriptions such as fear of exertion, perceived instability, fear of reinjury, and the interval from injury to surgery, because a longer interval may indicate prolonged adaptation to injury-related instability or persistent confidence-related concerns. Retrieval specifically focused on preoperative range of motion, IKDC score, and descriptions of instability when available."
+  },
+  {
+    "tool": "ACL-RSI prediction and attribution tool",
+    "action": "Postoperative recovery review",
+    "records": "Not specified",
+    "condition": "Postoperative records, follow-up records, and reassessment records",
+    "goal": "From the perspective of a sports medicine specialist and using the patient baseline profile as context, retrieve postoperative records and fields relevant to ACL-RSI score prediction and attribution. Retrieval focused on: (1) pain and trauma experience, because more severe early pain may be associated with greater long-term kinesiophobia, including VAS score, pain descriptions such as severe or intolerable pain, nighttime pain, and analgesic use; (2) early functional setbacks and stiffness, because postoperative extension deficit may be associated with lower long-term ACL-RSI, including knee range of motion, extension deficit, passive flexion angle, joint stiffness, and whether manipulation was required; (3) complications and adverse events that may undermine rehabilitation confidence, including infection, fever, deep vein thrombosis, poor wound healing, joint effusion or floating patella test, and swelling severity such as circumference difference; and (4) structural concerns on imaging that may affect perceived stability, including bone tunnel position, isometric status, screw or button position, notchplasty, tunnel enlargement, meniscal repair that may affect weight-bearing confidence, and cartilage injury grade."
+  },
+  {
+    "tool": "Clinical decision reasoning tool",
+    "action": "Surgical-constraint retrieval",
+    "records": "Operative report; discharge summary",
+    "condition": "Not applicable; target records were specified",
+    "goal": "Extract indicators related to ACLR rehabilitation and RTA pathway planning, including: (1) graft type, such as autologous hamstring tendon, bone–patellar tendon–bone graft, artificial graft, or allograft; (2) meniscal treatment, such as repair, resection, or meniscal shaping; and (3) cartilage treatment, such as microfracture, transplantation, or no treatment."
+  },
+  {
+    "tool": "Clinical decision reasoning tool",
+    "action": "Postoperative imaging-risk retrieval",
+    "records": "Not specified",
+    "condition": "Postoperative X-ray; postoperative computed tomography; Postoperative magnetic resonance imaging",
+    "goal": "Extract indicators related to ACLR rehabilitation and RTA pathway planning, including bone tunnel position assessment, such as whether the tunnel was anteriorly positioned, vertically oriented, or well positioned, and the status of internal fixation devices."
+  },
+  {
+    "tool": "Clinical decision reasoning tool",
+    "action": "Postoperative inflammatory-marker retrieval",
+    "records": "Not specified",
+    "condition": "Inpatient postoperative complete blood count, erythrocyte sedimentation rate and progress notes available by discharge",
+    "goal": "Extract available inpatient postoperative values of white blood cell count, neutrophil percentage, C-reactive protein and erythrocyte sedimentation rate relevant to rehabilitation planning."
+  },
+  {
+    "tool": "Clinical decision reasoning tool",
+    "action": "Background risk-factor retrieval",
+    "records": "Not specified",
+    "condition": "Preoperative laboratory reports, blood biochemistry reports and coagulation reports",
+    "goal": "Extract background risk indicators relevant to individualized rehabilitation precautions and RTA pathway planning, including D-dimer for thrombotic risk assessment, uric acid, and blood glucose values when available."
+  }
+]
